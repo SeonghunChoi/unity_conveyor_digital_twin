@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Unity 6과 WPF(.NET 8)가 함께 참조하는 데이터 규약 라이브러리.
+       외부 의존성 없음. JSON 직렬화 설정은 각 프로젝트에서 담당한다. -->
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <LangVersion>9.0</LangVersion>
+    <Nullable>disable</Nullable>
+    <RootNamespace>ConveyorTwin.Shared</RootNamespace>
+    <AssemblyName>ConveyorTwin.Shared</AssemblyName>
+  </PropertyGroup>
+
+  <!-- 빌드 후 Unity 프로젝트의 Plugins 폴더로 DLL 복사 (Twin/Assets가 있을 때만) -->
+  <PropertyGroup>
+    <UnityPluginDir>$(MSBuildProjectDirectory)/../../Twin/Assets/Plugins/Shared</UnityPluginDir>
+  </PropertyGroup>
+  <Target Name="CopyToUnity" AfterTargets="Build" Condition="Exists('$(MSBuildProjectDirectory)/../../Twin/Assets')">
+    <MakeDir Directories="$(UnityPluginDir)" />
+    <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(UnityPluginDir)" SkipUnchangedFiles="true" />
+  </Target>
+
+</Project>

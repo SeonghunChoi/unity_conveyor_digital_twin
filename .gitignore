@@ -1,0 +1,28 @@
+# ---------- .NET ----------
+bin/
+obj/
+.vs/
+*.user
+
+# ---------- Unity (Twin/) ----------
+Twin/[Ll]ibrary/
+Twin/[Tt]emp/
+Twin/[Oo]bj/
+Twin/[Bb]uild/
+Twin/[Bb]uilds/
+Twin/[Ll]ogs/
+Twin/[Uu]ser[Ss]ettings/
+Twin/*.csproj
+Twin/*.sln
+Twin/.vs/
+Twin/.idea/
+
+# Shared.dll은 빌드 산출물 (src/Shared 빌드 시 자동 복사)
+Twin/Assets/Plugins/Shared/
+Twin/Assets/Plugins/Shared.meta
+
+# ---------- CAD (라이선스상 원본·변환본 재배포 금지) ----------
+cad/*
+!cad/README.md
+Twin/Assets/ThirdParty/Cad/
+Twin/Assets/ThirdParty/Cad.meta
