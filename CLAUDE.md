@@ -1,4 +1,8 @@
-# CLAUDE.md — Unity Conveyor Digital Twin
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Unity Conveyor Digital Twin
 
 이 파일은 Claude Code가 세션 시작 시 읽는 프로젝트 컨텍스트입니다.
 claude.ai에서 진행한 기획 대화의 결정 사항을 옮겨 왔습니다. 결정이 바뀌면 이 파일을 함께 갱신하세요.
@@ -42,7 +46,16 @@ claude.ai에서 진행한 기획 대화의 결정 사항을 옮겨 왔습니다.
 - 연결 끊김은 `status` 토픽의 Last Will로 감지
 - 광전 센서는 물건 ID를 모르므로 트윈은 엣지 순서(FIFO)로 물건을 추적
 - 잼 판단: 입구 감지 후 `벨트 길이 / 속도 × 1.5`초 안에 출구 감지가 없으면 잼
-- **규약을 바꾸면 `src/Shared` 코드와 `docs/protocol.md`를 반드시 함께 수정한다.**
+- **규약을 바꾸면 `src/Shared` 코드와 `docs/protocol.md`를 반드시 함께 수정한다.** 둘이 어긋나면 코드가 기준이다.
+
+### Shared 코드가 양쪽에서 하는 역할
+
+- `Topics`: 토픽 문자열은 항상 `Topics.*(deviceId)` 헬퍼로 만든다. 서버·트윈 어디에도 토픽 리터럴을 직접 쓰지 않는다.
+- `SignalSpec`/`Signals`: **하나의 사양을 서버와 트윈이 반대 용도로 쓴다.** 서버는 주기·범위·QoS·Retained로 값을 생성·발행하고,
+  트윈은 같은 사양으로 이상값(`IsInRange`)과 stale(`StaleAfterMs` = 주기 × 3, 이벤트성은 0)을 판정한다. 신호를 추가하면 여기와 `Topics`에 함께 넣는다.
+- `Messages`: 데이터 메시지는 모두 `Envelope`(sid/seq/ts)를 상속한다. 예외로 `StatusMessage`는 seq가 없다 (Last Will로 브로커가 대신 발행하므로).
+  트윈의 seq 기록은 `status`의 sid가 바뀔 때 초기화된다.
+- 직렬화는 양쪽 모두 Newtonsoft JSON에 camelCase 네이밍 + 소문자 문자열 enum 설정을 각자 해야 `docs/protocol.md`의 페이로드와 맞는다.
 
 ## 장애 시나리오 (서버 버튼 → 트윈 대응)
 
@@ -56,7 +69,7 @@ claude.ai에서 진행한 기획 대화의 결정 사항을 옮겨 왔습니다.
 | 일차 | 작업 | 상태 |
 | --- | --- | --- |
 | 1 | 저장소 구성, 토픽·페이로드 규약 정의 | ✅ 완료 |
-| 2~3 | mk STEP 받기, FreeCAD 변환, Unity 임포트·계층 정리 (2일 초과 시 타임박스) | ⏳ 다음 |
+| 2~3 | mk STEP 받기, FreeCAD 변환, Unity 임포트·계층 정리 (2일 초과 시 타임박스) | ✅ 완료 (`docs/cad-pipeline.md`) |
 | 4~5 | WPF 서버 골격, 브로커 내장, 정상 데이터 발행, 로그 UI | |
 | 6~7 | 트윈 MQTT 수신, 벨트 구동, 물건 생성·이동 | |
 | 8~9 | 장애 버튼 + 트윈 대응 로직, 잼 판단 ★ | |
@@ -89,9 +102,34 @@ README에는 구조도, 페이로드 규약, 장애 시나리오, CAD 출처·�
 
 ```bash
 dotnet build src/Shared            # 빌드 + Twin/Assets/Plugins/Shared 로 DLL 자동 복사
+dotnet build                       # 솔루션 전체 (현재는 Shared만 포함)
 ```
+
+- DLL 복사는 `Twin/Assets`가 있을 때만 일어난다 (csproj의 `CopyToUnity` 타깃). 복사된 DLL은 `.gitignore` 대상이므로,
+  Shared를 고친 뒤에는 반드시 다시 빌드해야 Unity가 새 규약을 본다.
+- 테스트 프로젝트는 아직 없다.
+- 하위 프로젝트 생성 절차는 각 폴더 README에 있다: `Twin/README.md`(Unity 프로젝트 생성·패키지), `src/DummyServer/README.md`(4일 차 `dotnet new`/`sln add` 명령).
+
+### CAD 변환 (STEP → glb)
+
+```bash
+"C:/Users/seong/AppData/Local/Programs/FreeCAD 1.1/bin/FreeCADCmd.exe" tools/cad/export_conveyor.py   # cad/MK163596.stp → cad/conveyor.glb
+"C:/Users/seong/AppData/Local/Programs/FreeCAD 1.1/bin/python.exe" -I tools/cad/inspect_glb.py cad/conveyor.glb   # 노드·삼각형·UV·크기 점검
+```
+
+- FreeCADCmd는 추가 인수를 열 파일로 해석하므로 스크립트에 인수를 넘기지 않는다 (경로는 스크립트 안에서 결정).
+- glTF 내보내기는 형상에 저장된 삼각분할을 그대로 쓴다. `Shape.tessellate()`는 각도 허용치가 없어 8배가량 과분할되므로 `MeshPart.meshFromShape`로 미리 채운다.
+- 출력 노드: `Conveyor/{Belt, Drum_Head, Drum_Tail, DriveMotor, ControlBox, Frame, Legs}`. 볼트·너트류 225개 제거 후 약 9.9만 삼각형.
+  드럼 노드는 원점이 축 중심이라 그대로 회전시키면 된다. `EREG230AC`는 모터가 아니라 속도 조절기(제어 박스)다.
+- glb 좌표: m 단위, Y-up, 반송 방향은 glTF +Z (아이들 드럼 z=-0.975 → 구동 드럼 z=+0.975). UV와 머티리얼은 없다.
+- OCCT writer는 B-rep 면마다 primitive를 만들므로(약 4,000개) 스크립트가 메시별로 하나로 병합한 뒤
+  `Twin/Assets/ThirdParty/Cad/conveyor.glb`로 복사한다 (gitignore 대상). Unity 쪽은 glTFast 기본 임포트만 쓴다.
+- Unity 점검: 메뉴 `Tools/CAD/Check Conveyor Import` (`Twin/Assets/Editor/CadImportCheck.cs`)가 서브메시·축·드럼 간 거리를 콘솔에 출력한다.
+- **Unity 좌표 (2026-10-20 확인)**: 1유닛 = 1m, 반송 방향 = Unity **+Z** (Drum_Tail z=-0.975 → Drum_Head z=+0.975),
+  벨트 윗면 y≈0.850, 드럼 축 y=0.823. glTFast가 X를 반전하므로 구동부·제어 박스는 +X 쪽에 있다.
+  드럼은 로컬 X축 기준으로 회전시키며, 벨트 속도 v일 때 각속도 = v / 0.0275 rad/s (벨트 감은 외경 기준).
 
 ## 알려진 사항
 
-- `src/Shared`는 기획 단계에서 SDK 없이 작성되어 아직 컴파일 검증 전이다. 첫 세션에서 빌드부터 확인할 것.
-- 벨트 길이(잼 판단 기준값)는 CAD 확정 후 `docs/protocol.md`에 기입.
+- `src/Shared` 빌드 검증 완료 (2026-10-20, 경고·오류 0).
+- 아직 존재하지 않는 것: `src/DummyServer` 프로젝트.

@@ -4,6 +4,9 @@ obj/
 .vs/
 *.user
 
+# ---------- Python (tools/) ----------
+__pycache__/
+
 # ---------- Unity (Twin/) ----------
 Twin/[Ll]ibrary/
 Twin/[Tt]emp/
@@ -14,6 +17,7 @@ Twin/[Ll]ogs/
 Twin/[Uu]ser[Ss]ettings/
 Twin/*.csproj
 Twin/*.sln
+Twin/*.slnx
 Twin/.vs/
 Twin/.idea/
 

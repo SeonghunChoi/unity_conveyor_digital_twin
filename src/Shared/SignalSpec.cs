@@ -14,8 +14,7 @@ namespace ConveyorTwin.Shared
         public int Qos { get; }
         public bool Retained { get; }
 
-        public SignalSpec(string name, string unit, int periodMs,
-                          double validMin, double validMax, int qos, bool retained)
+        public SignalSpec(string name, string unit, int periodMs, double validMin, double validMax, int qos, bool retained)
         {
             Name = name;
             Unit = unit;
