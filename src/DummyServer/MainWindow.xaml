@@ -5,7 +5,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:ConveyorTwin.DummyServer"
         mc:Ignorable="d" d:DataContext="{d:DesignInstance local:MainViewModel}"
-        Title="Conveyor01 Dummy Server" Height="640" Width="1000"
+        Title="Conveyor01 Dummy Server" Height="720" Width="1180"
         FontFamily="Malgun Gothic" FontSize="13">
     <Window.Resources>
         <Style x:Key="Caption" TargetType="TextBlock">
@@ -49,6 +49,27 @@
             </WrapPanel>
         </Border>
 
+        <!-- 장애 버튼: 장애는 현실(서버) 쪽에서 일어나고 트윈은 대응만 한다 -->
+        <Border DockPanel.Dock="Top" Margin="0,0,0,8" BorderBrush="#E8B4B4" Background="#FFF7F7" BorderThickness="1" Padding="10" CornerRadius="4">
+            <StackPanel>
+                <TextBlock Style="{StaticResource Caption}" Text="장애 주입 (누르면 켜짐, 다시 누르면 복구)"/>
+                <WrapPanel>
+                    <WrapPanel.Resources>
+                        <Style TargetType="ToggleButton">
+                            <Setter Property="Padding" Value="12,6"/>
+                            <Setter Property="Margin" Value="0,4,8,0"/>
+                        </Style>
+                    </WrapPanel.Resources>
+                    <ToggleButton IsChecked="{Binding FaultDisconnect}" Content="연결 끊김" ToolTip="소켓 강제 종료 → 브로커가 Last Will(offline) 발행. 끊긴 동안의 메시지는 유실"/>
+                    <ToggleButton IsChecked="{Binding FaultDelay}" Content="전송 지연 3초" ToolTip="모든 발행을 3초 늦춤 (ts는 생성 시각 유지)"/>
+                    <ToggleButton IsChecked="{Binding FaultShuffle}" Content="순서 뒤섞기" ToolTip="발행마다 0~250ms 무작위 지연 + 5% 중복 재전송"/>
+                    <ToggleButton IsChecked="{Binding FaultAnomaly}" Content="이상값 송신" ToolTip="온도 999.9(측정 범위 밖), 전류 quality bad"/>
+                    <ToggleButton IsChecked="{Binding FaultJam}" Content="물건 걸림" ToolTip="벨트 중간 물건이 멈춤 → 출구 미감지, 뒤 물건 적체, 전류 +1.2A"/>
+                    <ToggleButton IsChecked="{Binding FaultMotor}" Content="모터 정지" ToolTip="state/run = fault, 속도 0"/>
+                </WrapPanel>
+            </StackPanel>
+        </Border>
+
         <!-- 송신 로그: 서버가 "보낸 것". 트윈이 "받은 것"과 비교하는 기준 -->
         <DockPanel DockPanel.Dock="Top" Margin="0,0,0,4" LastChildFill="False">
             <TextBlock DockPanel.Dock="Left" FontWeight="SemiBold" VerticalAlignment="Center">
@@ -66,6 +87,7 @@
                     <GridViewColumn Header="토픽" Width="280" DisplayMemberBinding="{Binding Topic}"/>
                     <GridViewColumn Header="QoS" Width="40" DisplayMemberBinding="{Binding Qos}"/>
                     <GridViewColumn Header="R" Width="30" DisplayMemberBinding="{Binding Retained}"/>
+                    <GridViewColumn Header="장애 처리" Width="170" DisplayMemberBinding="{Binding Note}"/>
                     <GridViewColumn Header="페이로드" Width="520" DisplayMemberBinding="{Binding Payload}"/>
                 </GridView>
             </ListView.View>

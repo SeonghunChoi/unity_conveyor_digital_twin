@@ -8,7 +8,8 @@ namespace ConveyorTwin.Twin
     /// 세션·순번 검사 (docs/protocol.md 4절).
     /// - sid가 바뀌면 (서버 재시작) 모든 토픽의 seq 기록을 초기화하고 SessionChanged를 알린다
     /// - 같은 sid에서 seq가 마지막 처리 값 이하이면 중복·과거 메시지로 보고 버린다
-    /// 순서가 뒤바뀐 엣지를 재정렬하는 버퍼는 8일 차 장애 대응에서 추가한다.
+    /// - seq가 건너뛰면 그만큼 유실된 것으로 본다 (LastGap)
+    /// 순서 정렬은 컨트롤러의 재생 시계가 맡는다 (ts 순으로 처리한 뒤 이 검사를 거친다).
     /// </summary>
     public sealed class MessageGate
     {
@@ -31,17 +32,33 @@ namespace ConveyorTwin.Twin
             SessionChanged?.Invoke(old, sid);
         }
 
+        /// <summary>
+        /// 직전 Accept에서 건너뛴 seq 수 (마지막 처리 seq + 1보다 큰 seq가 왔을 때).
+        /// 센서 엣지처럼 하나라도 잃으면 안 되는 토픽에서 유실 감지에 쓴다.
+        /// </summary>
+        public long LastGap { get; private set; }
+
         /// <summary>처리해도 되는 메시지면 true</summary>
         public bool Accept(string topic, Envelope message)
         {
             ObserveSession(message.Sid);
-            if (_lastSeq.TryGetValue(topic, out var last) && message.Seq <= last)
+            LastGap = 0;
+            if (_lastSeq.TryGetValue(topic, out var last))
             {
-                Dropped++;
-                return false;
+                if (message.Seq <= last)
+                {
+                    Dropped++;
+                    return false;
+                }
+                LastGap = message.Seq - last - 1;
             }
             _lastSeq[topic] = message.Seq;
             return true;
         }
+
+        /// <summary>
+        /// 토픽의 seq 기록을 지운다. 유실이 이미 알려진 구간(설비 연결 끊김) 뒤에 같은 유실을 다시 감지하지 않기 위해.
+        /// </summary>
+        public void Forget(string topic) => _lastSeq.Remove(topic);
     }
 }

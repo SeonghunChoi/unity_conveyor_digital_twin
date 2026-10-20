@@ -7,7 +7,7 @@ namespace ConveyorTwin.DummyServer.Simulation;
 /// <summary>UI 표시용 현재 상태 스냅샷</summary>
 public sealed record ConveyorSnapshot(
     RunState State, double SpeedMps, double MotorTempC, double MotorCurrentA,
-    int ItemsOnBelt, long ItemsDelivered);
+    int ItemsOnBelt, long ItemsDelivered, bool Jammed);
 
 /// <summary>
 /// 가상 컨베이어 ("현실" 역할). 물리 상태를 진행시키고 센서가 볼 원시 신호만 발행한다.
@@ -15,10 +15,13 @@ public sealed record ConveyorSnapshot(
 ///
 /// 물건 추적: 각 물건의 앞단 위치(입구 센서 = 0m)를 벨트 속도로 적분하고,
 /// 앞단·뒷단이 센서 위치를 지나는 순간 엣지를 발행한다. 속도가 0이 되면 물건도 멈춘다.
+/// 물건은 앞 물건을 추월하지 못한다 (걸린 물건 뒤로 쌓인다).
+///
+/// 설비 장애(물건 걸림, 모터 정지, 이상값)는 UI 스레드에서 플래그로 켜고, 시뮬레이션 루프가 매 틱 반영한다.
 /// </summary>
 public sealed class ConveyorSimulator
 {
-    // ---- 정상 운전 기준값 (docs/protocol.md 7절: 서버 구현 시 조정) ----
+    // ---- 정상 운전 기준값 (docs/protocol.md 7절) ----
     const double NominalSpeedMps = 0.5;
     const double SpeedNoise = 0.004;
     const double NoLoadCurrentA = 1.8;      // 0.37kW 감속 모터 무부하 전류 (가정)
@@ -36,6 +39,12 @@ public sealed class ConveyorSimulator
     const double ItemWeightMinKg = 2.0;
     const double ItemWeightMaxKg = 15.0;
 
+    // ---- 장애 ----
+    const double JamExtraCurrentA = 1.2;    // 걸린 물건과 벨트 마찰로 인한 전류 상승
+    const double JamPositionM = 1.2;        // 걸릴 물건이 없으면 다음 물건이 이 위치에서 걸림
+    const double AnomalyTempC = 999.9;      // SignalSpec.MotorTemp 측정 범위(-20~150) 밖
+    const string MotorFaultReason = "motor overload trip";
+
     static readonly TimeSpan Tick = TimeSpan.FromMilliseconds(20);
 
     sealed class Item
@@ -44,6 +53,7 @@ public sealed class ConveyorSimulator
         public double WeightKg;
         public bool EntryCleared;   // 뒷단이 입구 센서를 지남
         public bool ExitBlocked;    // 앞단이 출구 센서에 도달
+        public bool Stuck;          // 물건 걸림 장애
     }
 
     readonly DevicePublisher _pub;
@@ -58,6 +68,16 @@ public sealed class ConveyorSimulator
     double _nextSpawnS;
     long _delivered;
 
+    volatile bool _jamRequested;
+    volatile bool _jamClearRequested;
+    bool _jamPending;   // 걸릴 물건이 없어서 다음 물건이 JamPositionM에 오기를 기다림
+
+    /// <summary>모터 정지 장애 (과부하 트립). 끄면 다시 가동</summary>
+    public volatile bool MotorFault;
+
+    /// <summary>이상값 송신 장애: 온도는 측정 범위 밖 값, 전류는 quality bad로 보낸다</summary>
+    public volatile bool Anomaly;
+
     public event Action<ConveyorSnapshot>? Updated;
 
     public ConveyorSimulator(DevicePublisher publisher, string deviceId = Topics.DefaultDeviceId)
@@ -65,6 +85,12 @@ public sealed class ConveyorSimulator
         _pub = publisher;
         _deviceId = deviceId;
     }
+
+    /// <summary>물건 걸림 장애: 벨트 중간의 물건 하나가 멈춘다</summary>
+    public void RequestJam() => _jamRequested = true;
+
+    /// <summary>물건 걸림 해소</summary>
+    public void ClearJam() => _jamClearRequested = true;
 
     public async Task RunAsync(CancellationToken ct)
     {
@@ -81,6 +107,7 @@ public sealed class ConveyorSimulator
             double dt = now - last;
             last = now;
 
+            await ApplyFaultsAsync(ct);
             Step(dt);
             await MoveItemsAsync(dt, ct);
             if (now >= _nextSpawnS)
@@ -95,15 +122,47 @@ public sealed class ConveyorSimulator
             if (now >= nextCurrentPub)
             {
                 nextCurrentPub = now + Signals.MotorCurrent.PeriodMs / 1000.0;
-                await _pub.PublishTelemetryAsync(Signals.MotorCurrent, Topics.MotorCurrent(_deviceId), _current, Quality.Good, ct);
+                if (Anomaly)
+                    await _pub.PublishTelemetryAsync(Signals.MotorCurrent, Topics.MotorCurrent(_deviceId), _current, Quality.Bad, ct, "이상값(quality bad)");
+                else
+                    await _pub.PublishTelemetryAsync(Signals.MotorCurrent, Topics.MotorCurrent(_deviceId), _current, Quality.Good, ct);
             }
             if (now >= nextTempPub)
             {
                 nextTempPub = now + Signals.MotorTemp.PeriodMs / 1000.0;
-                await _pub.PublishTelemetryAsync(Signals.MotorTemp, Topics.MotorTemp(_deviceId), _temp, Quality.Good, ct);
+                if (Anomaly)
+                    await _pub.PublishTelemetryAsync(Signals.MotorTemp, Topics.MotorTemp(_deviceId), AnomalyTempC, Quality.Good, ct, "이상값(범위 밖)");
+                else
+                    await _pub.PublishTelemetryAsync(Signals.MotorTemp, Topics.MotorTemp(_deviceId), _temp, Quality.Good, ct);
             }
 
-            Updated?.Invoke(new ConveyorSnapshot(_state, _speed, _temp, _current, _items.Count, _delivered));
+            Updated?.Invoke(new ConveyorSnapshot(_state, _speed, _temp, _current, _items.Count, _delivered,
+                _items.Any(i => i.Stuck) || _jamPending));
+        }
+    }
+
+    async Task ApplyFaultsAsync(CancellationToken ct)
+    {
+        var wanted = MotorFault ? RunState.Fault : RunState.Running;
+        if (wanted != _state)
+        {
+            _state = wanted;
+            await _pub.PublishRunStateAsync(_state, MotorFault ? MotorFaultReason : null, ct);
+        }
+
+        if (_jamRequested)
+        {
+            _jamRequested = false;
+            // 입구를 완전히 지났고 출구에 닿지 않은 물건 중 맨 앞
+            var target = _items.FirstOrDefault(i => !i.ExitBlocked && i.EntryCleared && i.FrontM < Equipment.BeltLengthM - 0.1);
+            if (target != null) target.Stuck = true;
+            else _jamPending = true;
+        }
+        if (_jamClearRequested)
+        {
+            _jamClearRequested = false;
+            _jamPending = false;
+            foreach (var i in _items) i.Stuck = false;
         }
     }
 
@@ -114,7 +173,10 @@ public sealed class ConveyorSimulator
         _speed = running ? NominalSpeedMps + Noise(SpeedNoise) : 0.0;
 
         double loadKg = _items.Sum(i => i.WeightKg);
-        _current = running ? NoLoadCurrentA + loadKg * CurrentPerKgA + Noise(CurrentNoise) : 0.0;
+        bool jammed = _items.Any(i => i.Stuck);
+        _current = running
+            ? NoLoadCurrentA + loadKg * CurrentPerKgA + (jammed ? JamExtraCurrentA : 0.0) + Noise(CurrentNoise)
+            : 0.0;
 
         // 정상 상태 온도는 전류에 비례해 오르고, 1차 지연으로 따라간다
         double targetTemp = AmbientTempC + (running ? 12.0 * _current : 0.0);
@@ -127,7 +189,20 @@ public sealed class ConveyorSimulator
         for (int i = 0; i < _items.Count; i++)
         {
             var item = _items[i];
-            item.FrontM += move;
+            if (!item.Stuck)
+            {
+                double next = item.FrontM + move;
+                // 앞 물건(먼저 들어온 물건)을 추월하지 못한다: 걸린 물건 뒤에 쌓인다
+                if (i > 0)
+                    next = Math.Min(next, _items[i - 1].FrontM - ItemLengthM);
+                item.FrontM = Math.Max(item.FrontM, next);
+
+                if (_jamPending && !item.ExitBlocked && item.FrontM >= JamPositionM)
+                {
+                    item.Stuck = true;
+                    _jamPending = false;
+                }
+            }
 
             if (!item.EntryCleared && item.FrontM >= ItemLengthM)
             {
@@ -155,7 +230,7 @@ public sealed class ConveyorSimulator
             return;
         var last = _items.Count > 0 ? _items[^1] : null;
         if (last != null && last.FrontM - ItemLengthM < MinGapM)
-            return; // 앞 물건과 간격 확보 전까지 대기
+            return; // 앞 물건과 간격 확보 전까지 대기 (걸림으로 쌓이면 투입도 멈춘다)
 
         var item = new Item { WeightKg = ItemWeightMinKg + _rng.NextDouble() * (ItemWeightMaxKg - ItemWeightMinKg) };
         _items.Add(item);

@@ -37,6 +37,23 @@ dotnet run --project src/DummyServer
 
 물건 위치는 시간이 아니라 **속도를 적분**해서 구합니다. 속도가 0이 되면(모터 정지 장애) 물건도 그 자리에 멈춥니다.
 
+## 장애 버튼 (8~9일 차)
+
+| 버튼 | 구현 위치 | 동작 |
+| --- | --- | --- |
+| 연결 끊김 | `DevicePublisher.DropConnection` | 클라이언트를 DISCONNECT 없이 `Dispose` → 브로커가 Last Will 발행. 끄면 새로 접속해 online 발행. 끊긴 동안의 메시지는 "미송신"으로 로그에 남는다 |
+| 전송 지연 3초 | `DevicePublisher` 송신 큐 | 순서를 지키는 큐에서 3초 뒤 송신. 꺼도 밀린 메시지가 먼저 다 나간다 |
+| 순서 뒤섞기 | `DevicePublisher.SendLaterAsync` | 메시지마다 0~250ms 무작위 지연 (순서가 바뀜), 5%는 300~900ms 뒤 중복 재전송 |
+| 이상값 송신 | `ConveyorSimulator` | 온도 999.9 (측정 범위 -20~150 밖), 전류 `quality: bad` |
+| 물건 걸림 | `ConveyorSimulator` | 입구를 지난 맨 앞 물건이 멈춤 (없으면 다음 물건이 1.2m에서). 뒤 물건은 추월하지 못해 쌓이고, 모터 전류 +1.2A |
+| 모터 정지 | `ConveyorSimulator` | `state/run` = `fault` (`motor overload trip`), 속도·전류 0 |
+
+통신 장애는 "통신 경로"인 `DevicePublisher`가, 설비 장애는 "현실"인 `ConveyorSimulator`가 만든다.
+연결이 끊겨도 시뮬레이션은 계속 진행된다 (현실은 멈추지 않는다).
+
+검증 (UI Automation으로 버튼을 누르고 구독 클라이언트로 기록): 6종 모두 위 동작대로 수신됨.
+전송 지연을 끈 직후에도 토픽 간 `ts` 역전 0건, 밀린 메시지가 약 2.9초에 걸쳐 차례로 나간 뒤 지연 0으로 돌아옴.
+
 ## 검증 결과 (2026-10-20, 구독 클라이언트로 25초 수신)
 
 - 토픽별 seq 연속, 센서 엣지 true/false 교대 확인

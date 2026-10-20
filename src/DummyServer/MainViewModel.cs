@@ -54,6 +54,60 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     /// <summary>로그 화면 갱신만 멈춘다 (발행은 계속)</summary>
     public bool Paused { get => _paused; set => Set(ref _paused, value); }
 
+    // ---- 장애 버튼 (CLAUDE.md 설계 원칙 3: 장애는 현실 쪽에서 일어난다) ----
+    /// <summary>전송 지연 장애의 지연 시간</summary>
+    public const int FaultDelayMs = 3000;
+
+    bool _faultDisconnect, _faultDelay, _faultShuffle, _faultAnomaly, _faultJam, _faultMotor;
+
+    public bool FaultDisconnect
+    {
+        get => _faultDisconnect;
+        set
+        {
+            if (!Set(ref _faultDisconnect, value)) return;
+            if (value) _publisher.DropConnection();
+            else _ = RunFaultActionAsync(() => _publisher.RestoreConnectionAsync(_cts.Token), "연결 복구");
+        }
+    }
+
+    public bool FaultDelay
+    {
+        get => _faultDelay;
+        set { if (Set(ref _faultDelay, value)) _publisher.DelayMs = value ? FaultDelayMs : 0; }
+    }
+
+    public bool FaultShuffle
+    {
+        get => _faultShuffle;
+        set { if (Set(ref _faultShuffle, value)) _publisher.Shuffle = value; }
+    }
+
+    public bool FaultAnomaly
+    {
+        get => _faultAnomaly;
+        set { if (Set(ref _faultAnomaly, value) && _sim != null) _sim.Anomaly = value; }
+    }
+
+    public bool FaultJam
+    {
+        get => _faultJam;
+        set
+        {
+            if (!Set(ref _faultJam, value) || _sim == null) return;
+            if (value) _sim.RequestJam();
+            else _sim.ClearJam();
+        }
+    }
+
+    public bool FaultMotor
+    {
+        get => _faultMotor;
+        set { if (Set(ref _faultMotor, value) && _sim != null) _sim.MotorFault = value; }
+    }
+
+    ConveyorSimulator? _sim;
+
     public MainViewModel()
     {
         _publisher.Sent += m => _pending.Enqueue(m);
@@ -69,9 +123,15 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         BrokerStatus = "대기 중";
         await _publisher.ConnectAsync(_cts.Token);
 
-        var sim = new ConveyorSimulator(_publisher);
-        sim.Updated += s => _snapshot = s;
-        _simTask = Task.Run(() => sim.RunAsync(_cts.Token));
+        _sim = new ConveyorSimulator(_publisher);
+        _sim.Updated += s => _snapshot = s;
+        _simTask = Task.Run(() => _sim.RunAsync(_cts.Token));
+    }
+
+    async Task RunFaultActionAsync(Func<Task> action, string name)
+    {
+        try { await action(); }
+        catch (Exception e) { BrokerStatus = $"{name} 실패: {e.GetBaseException().Message}"; }
     }
 
     public void ClearLog() => Log.Clear();
@@ -97,7 +157,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
             SpeedText = $"{s.SpeedMps:F3} m/s";
             TempText = $"{s.MotorTempC:F1} °C";
             CurrentText = $"{s.MotorCurrentA:F2} A";
-            ItemsText = $"벨트 위 {s.ItemsOnBelt} / 배출 {s.ItemsDelivered}";
+            ItemsText = $"벨트 위 {s.ItemsOnBelt} / 배출 {s.ItemsDelivered}" + (s.Jammed ? " (걸림)" : "");
         }
 
         if (_simTask is { IsFaulted: true })
@@ -121,10 +181,11 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
-    void Set<T>(ref T field, T value, [CallerMemberName] string? name = null)
+    bool Set<T>(ref T field, T value, [CallerMemberName] string? name = null)
     {
-        if (EqualityComparer<T>.Default.Equals(field, value)) return;
+        if (EqualityComparer<T>.Default.Equals(field, value)) return false;
         field = value;
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
+        return true;
     }
 }
