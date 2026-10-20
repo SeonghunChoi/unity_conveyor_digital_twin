@@ -1,0 +1,74 @@
+﻿<Window x:Class="ConveyorTwin.DummyServer.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:local="clr-namespace:ConveyorTwin.DummyServer"
+        mc:Ignorable="d" d:DataContext="{d:DesignInstance local:MainViewModel}"
+        Title="Conveyor01 Dummy Server" Height="640" Width="1000"
+        FontFamily="Malgun Gothic" FontSize="13">
+    <Window.Resources>
+        <Style x:Key="Caption" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="#666"/>
+            <Setter Property="Margin" Value="0,0,8,2"/>
+        </Style>
+        <Style x:Key="Value" TargetType="TextBlock">
+            <Setter Property="FontFamily" Value="Consolas"/>
+            <Setter Property="FontSize" Value="15"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Margin" Value="0,0,24,0"/>
+        </Style>
+    </Window.Resources>
+
+    <DockPanel Margin="12">
+        <!-- 브로커·세션 상태 -->
+        <Border DockPanel.Dock="Top" Background="#F3F5F7" Padding="10" CornerRadius="4">
+            <WrapPanel>
+                <StackPanel><TextBlock Style="{StaticResource Caption}" Text="브로커"/>
+                    <TextBlock Style="{StaticResource Value}"><Run Text="{Binding BrokerEndpoint, Mode=OneWay}"/> <Run Text="{Binding BrokerStatus, Mode=OneWay}"/></TextBlock></StackPanel>
+                <StackPanel><TextBlock Style="{StaticResource Caption}" Text="세션 ID (sid)"/>
+                    <TextBlock Style="{StaticResource Value}" Text="{Binding Sid, Mode=OneWay}"/></StackPanel>
+                <StackPanel><TextBlock Style="{StaticResource Caption}" Text="접속 클라이언트"/>
+                    <TextBlock Style="{StaticResource Value}" Text="{Binding ClientsText}"/></StackPanel>
+            </WrapPanel>
+        </Border>
+
+        <!-- 가상 설비 현재값 (서버가 "현실"로서 가진 값) -->
+        <Border DockPanel.Dock="Top" Margin="0,8,0,8" BorderBrush="#DDD" BorderThickness="1" Padding="10" CornerRadius="4">
+            <WrapPanel>
+                <StackPanel><TextBlock Style="{StaticResource Caption}" Text="가동 상태"/>
+                    <TextBlock Style="{StaticResource Value}" Text="{Binding RunStateText}"/></StackPanel>
+                <StackPanel><TextBlock Style="{StaticResource Caption}" Text="벨트 속도"/>
+                    <TextBlock Style="{StaticResource Value}" Text="{Binding SpeedText}"/></StackPanel>
+                <StackPanel><TextBlock Style="{StaticResource Caption}" Text="모터 온도"/>
+                    <TextBlock Style="{StaticResource Value}" Text="{Binding TempText}"/></StackPanel>
+                <StackPanel><TextBlock Style="{StaticResource Caption}" Text="모터 전류"/>
+                    <TextBlock Style="{StaticResource Value}" Text="{Binding CurrentText}"/></StackPanel>
+                <StackPanel><TextBlock Style="{StaticResource Caption}" Text="물건"/>
+                    <TextBlock Style="{StaticResource Value}" Text="{Binding ItemsText}"/></StackPanel>
+            </WrapPanel>
+        </Border>
+
+        <!-- 송신 로그: 서버가 "보낸 것". 트윈이 "받은 것"과 비교하는 기준 -->
+        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,4" LastChildFill="False">
+            <TextBlock DockPanel.Dock="Left" FontWeight="SemiBold" VerticalAlignment="Center">
+                <Run Text="송신 로그"/> <Run Foreground="#666" Text="(누적"/><Run Foreground="#666" Text="{Binding SentCount, Mode=OneWay}"/><Run Foreground="#666" Text="건, 최근 1000건 표시)"/>
+            </TextBlock>
+            <Button DockPanel.Dock="Right" Content="지우기" Padding="10,2" Click="OnClearLog"/>
+            <ToggleButton DockPanel.Dock="Right" Content="일시정지" Padding="10,2" Margin="0,0,6,0" IsChecked="{Binding Paused}"/>
+        </DockPanel>
+
+        <ListView ItemsSource="{Binding Log}" FontFamily="Consolas" FontSize="12"
+                  VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling">
+            <ListView.View>
+                <GridView>
+                    <GridViewColumn Header="시각" Width="95" DisplayMemberBinding="{Binding Time, StringFormat=HH:mm:ss.fff}"/>
+                    <GridViewColumn Header="토픽" Width="280" DisplayMemberBinding="{Binding Topic}"/>
+                    <GridViewColumn Header="QoS" Width="40" DisplayMemberBinding="{Binding Qos}"/>
+                    <GridViewColumn Header="R" Width="30" DisplayMemberBinding="{Binding Retained}"/>
+                    <GridViewColumn Header="페이로드" Width="520" DisplayMemberBinding="{Binding Payload}"/>
+                </GridView>
+            </ListView.View>
+        </ListView>
+    </DockPanel>
+</Window>

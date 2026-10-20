@@ -28,8 +28,8 @@ claude.ai에서 진행한 기획 대화의 결정 사항을 옮겨 왔습니다.
 | 구성 | 기술 | 위치 |
 | --- | --- | --- |
 | 공용 규약 | netstandard2.1 클래스 라이브러리, 외부 의존성 없음 | `src/Shared` |
-| 더미 서버 | WPF (.NET 8) + MQTTnet 브로커 내장 + 데이터 발행 | `src/DummyServer` (4일 차 생성) |
-| 트윈 | Unity 6 LTS, URP, Newtonsoft JSON, MQTTnet(netstandard 빌드) | `Twin` |
+| 더미 서버 | WPF (.NET 8) + MQTTnet 5.2 브로커 내장 + 데이터 발행 | `src/DummyServer` |
+| 트윈 | Unity 6 LTS, URP, Newtonsoft JSON, MQTTnet 4.3.x(netstandard 빌드, 5.x는 net8+ 전용이라 불가) | `Twin` |
 | 통신 | MQTT, `127.0.0.1:1883`, 토픽 `dt/conveyor01/#` | `docs/protocol.md` |
 | CAD | mk GUF-P 2000 STEP → FreeCAD → glTF → glTFast | `cad` (저장소 미포함) |
 
@@ -53,6 +53,7 @@ claude.ai에서 진행한 기획 대화의 결정 사항을 옮겨 왔습니다.
 - `Topics`: 토픽 문자열은 항상 `Topics.*(deviceId)` 헬퍼로 만든다. 서버·트윈 어디에도 토픽 리터럴을 직접 쓰지 않는다.
 - `SignalSpec`/`Signals`: **하나의 사양을 서버와 트윈이 반대 용도로 쓴다.** 서버는 주기·범위·QoS·Retained로 값을 생성·발행하고,
   트윈은 같은 사양으로 이상값(`IsInRange`)과 stale(`StaleAfterMs` = 주기 × 3, 이벤트성은 0)을 판정한다. 신호를 추가하면 여기와 `Topics`에 함께 넣는다.
+- `Equipment`: 벨트 길이(1.95m)와 잼 판단 배수(1.5). 서버는 물건 이동 시뮬레이션에, 트윈은 잼 판단에 쓴다.
 - `Messages`: 데이터 메시지는 모두 `Envelope`(sid/seq/ts)를 상속한다. 예외로 `StatusMessage`는 seq가 없다 (Last Will로 브로커가 대신 발행하므로).
   트윈의 seq 기록은 `status`의 sid가 바뀔 때 초기화된다.
 - 직렬화는 양쪽 모두 Newtonsoft JSON에 camelCase 네이밍 + 소문자 문자열 enum 설정을 각자 해야 `docs/protocol.md`의 페이로드와 맞는다.
@@ -70,7 +71,7 @@ claude.ai에서 진행한 기획 대화의 결정 사항을 옮겨 왔습니다.
 | --- | --- | --- |
 | 1 | 저장소 구성, 토픽·페이로드 규약 정의 | ✅ 완료 |
 | 2~3 | mk STEP 받기, FreeCAD 변환, Unity 임포트·계층 정리 (2일 초과 시 타임박스) | ✅ 완료 (`docs/cad-pipeline.md`) |
-| 4~5 | WPF 서버 골격, 브로커 내장, 정상 데이터 발행, 로그 UI | |
+| 4~5 | WPF 서버 골격, 브로커 내장, 정상 데이터 발행, 로그 UI | ✅ 완료 |
 | 6~7 | 트윈 MQTT 수신, 벨트 구동, 물건 생성·이동 | |
 | 8~9 | 장애 버튼 + 트윈 대응 로직, 잼 판단 ★ | |
 | 10 | 상태별 셰이더 하이라이트, 알람 | |
@@ -102,7 +103,8 @@ README에는 구조도, 페이로드 규약, 장애 시나리오, CAD 출처·�
 
 ```bash
 dotnet build src/Shared            # 빌드 + Twin/Assets/Plugins/Shared 로 DLL 자동 복사
-dotnet build                       # 솔루션 전체 (현재는 Shared만 포함)
+dotnet build src                   # 솔루션 전체 (src/unity-conveyor-digital-twin.sln: DummyServer + Shared)
+dotnet run --project src/DummyServer  # 더미 서버 실행 (브로커 127.0.0.1:1883 + 가상 컨베이어)
 ```
 
 - DLL 복사는 `Twin/Assets`가 있을 때만 일어난다 (csproj의 `CopyToUnity` 타깃). 복사된 DLL은 `.gitignore` 대상이므로,
@@ -132,4 +134,6 @@ dotnet build                       # 솔루션 전체 (현재는 Shared만 포�
 ## 알려진 사항
 
 - `src/Shared` 빌드 검증 완료 (2026-10-20, 경고·오류 0).
-- 아직 존재하지 않는 것: `src/DummyServer` 프로젝트.
+- 더미 서버의 가상 설비(`DevicePublisher`)는 브로커 내부 API가 아니라 **일반 MQTT 클라이언트로 접속**해 발행한다.
+  그래야 Last Will이 실제로 동작한다 (8일 차 "연결 끊김" 장애). Will로 온 offline의 `ts`는 접속 시각이므로 트윈은 수신 시각을 쓴다.
+- 서버 시뮬레이션은 물건 위치를 속도 적분으로 진행시키므로, 속도를 0으로 만들면 물건도 멈춘다 (모터 정지·물건 걸림 장애의 기반).
