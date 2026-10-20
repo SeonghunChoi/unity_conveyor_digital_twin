@@ -29,7 +29,7 @@ claude.ai에서 진행한 기획 대화의 결정 사항을 옮겨 왔습니다.
 | --- | --- | --- |
 | 공용 규약 | netstandard2.1 클래스 라이브러리, 외부 의존성 없음 | `src/Shared` |
 | 더미 서버 | WPF (.NET 8) + MQTTnet 5.2 브로커 내장 + 데이터 발행 | `src/DummyServer` |
-| 트윈 | Unity 6 LTS, URP, Newtonsoft JSON, MQTTnet 4.3.x(netstandard 빌드, 5.x는 net8+ 전용이라 불가) | `Twin` |
+| 트윈 | Unity 6.3 LTS, URP, Newtonsoft JSON, MQTTnet 4.3.7(netstandard2.1, `src/UnityPlugins`가 복사. 5.x는 net8+ 전용이라 불가) | `Twin` |
 | 통신 | MQTT, `127.0.0.1:1883`, 토픽 `dt/conveyor01/#` | `docs/protocol.md` |
 | CAD | mk GUF-P 2000 STEP → FreeCAD → glTF → glTFast | `cad` (저장소 미포함) |
 
@@ -72,7 +72,7 @@ claude.ai에서 진행한 기획 대화의 결정 사항을 옮겨 왔습니다.
 | 1 | 저장소 구성, 토픽·페이로드 규약 정의 | ✅ 완료 |
 | 2~3 | mk STEP 받기, FreeCAD 변환, Unity 임포트·계층 정리 (2일 초과 시 타임박스) | ✅ 완료 (`docs/cad-pipeline.md`) |
 | 4~5 | WPF 서버 골격, 브로커 내장, 정상 데이터 발행, 로그 UI | ✅ 완료 |
-| 6~7 | 트윈 MQTT 수신, 벨트 구동, 물건 생성·이동 | |
+| 6~7 | 트윈 MQTT 수신, 벨트 구동, 물건 생성·이동 | ✅ 완료 (벨트 표면 흐름은 10일 차 셰이더) |
 | 8~9 | 장애 버튼 + 트윈 대응 로직, 잼 판단 ★ | |
 | 10 | 상태별 셰이더 하이라이트, 알람 | |
 | 11~12 | HMI 대시보드, 연결 상태 표시, 서버 자동 실행 | |
@@ -103,7 +103,7 @@ README에는 구조도, 페이로드 규약, 장애 시나리오, CAD 출처·�
 
 ```bash
 dotnet build src/Shared            # 빌드 + Twin/Assets/Plugins/Shared 로 DLL 자동 복사
-dotnet build src                   # 솔루션 전체 (src/unity-conveyor-digital-twin.sln: DummyServer + Shared)
+dotnet build src                   # 솔루션 전체 (DummyServer, Shared, UnityPlugins). Shared·MQTTnet DLL을 Twin/Assets/Plugins로 복사
 dotnet run --project src/DummyServer  # 더미 서버 실행 (브로커 127.0.0.1:1883 + 가상 컨베이어)
 ```
 
@@ -126,6 +126,7 @@ dotnet run --project src/DummyServer  # 더미 서버 실행 (브로커 127.0.0.
 - glb 좌표: m 단위, Y-up, 반송 방향은 glTF +Z (아이들 드럼 z=-0.975 → 구동 드럼 z=+0.975). UV와 머티리얼은 없다.
 - OCCT writer는 B-rep 면마다 primitive를 만들므로(약 4,000개) 스크립트가 메시별로 하나로 병합한 뒤
   `Twin/Assets/ThirdParty/Cad/conveyor.glb`로 복사한다 (gitignore 대상). Unity 쪽은 glTFast 기본 임포트만 쓴다.
+- 트윈 씬은 메뉴 `Tools/Twin/Setup Scene`이 glb로 다시 구성한다 (`Assets/Scenes/Twin.unity`). 트윈 구조·추정 방식은 `Twin/README.md`.
 - Unity 점검: 메뉴 `Tools/CAD/Check Conveyor Import` (`Twin/Assets/Editor/CadImportCheck.cs`)가 서브메시·축·드럼 간 거리를 콘솔에 출력한다.
 - **Unity 좌표 (2026-10-20 확인)**: 1유닛 = 1m, 반송 방향 = Unity **+Z** (Drum_Tail z=-0.975 → Drum_Head z=+0.975),
   벨트 윗면 y≈0.850, 드럼 축 y=0.823. glTFast가 X를 반전하므로 구동부·제어 박스는 +X 쪽에 있다.
