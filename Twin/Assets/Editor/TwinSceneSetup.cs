@@ -13,6 +13,7 @@ namespace ConveyorTwin.EditorTools
     {
         const string GlbPath = "Assets/ThirdParty/Cad/conveyor.glb";
         const string ScenePath = "Assets/Scenes/Twin.unity";
+        const string StatusShaderPath = "Assets/Shaders/StatusLit.shader";
 
         [MenuItem("Tools/Twin/Setup Scene")]
         static void Setup()
@@ -31,12 +32,22 @@ namespace ConveyorTwin.EditorTools
             var conveyor = (GameObject)PrefabUtility.InstantiatePrefab(glb);
             conveyor.name = "Conveyor";
 
+            // 상태 셰이더는 직접 참조해야 플레이어 빌드에 포함된다 (Shader.Find만으로는 빠질 수 있음)
+            var statusShader = AssetDatabase.LoadAssetAtPath<Shader>(StatusShaderPath);
+            if (statusShader == null)
+                Debug.LogWarning($"[Twin] {StatusShaderPath} 를 찾을 수 없습니다. 상태 하이라이트 없이 구성합니다.");
+
             var twin = new GameObject("Twin");
             var controller = twin.AddComponent<ConveyorTwinController>();
             twin.AddComponent<TwinHud>();
+            var visuals = twin.AddComponent<TwinVisuals>();
             var so = new SerializedObject(controller);
             so.FindProperty("conveyorRoot").objectReferenceValue = conveyor.transform;
+            so.FindProperty("statusShader").objectReferenceValue = statusShader;
             so.ApplyModifiedPropertiesWithoutUndo();
+            var vso = new SerializedObject(visuals);
+            vso.FindProperty("statusShader").objectReferenceValue = statusShader;
+            vso.ApplyModifiedPropertiesWithoutUndo();
 
             // 입구(-Z) 쪽 비스듬한 위에서 벨트 전체가 보이게
             var cam = Camera.main;

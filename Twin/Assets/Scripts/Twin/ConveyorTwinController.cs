@@ -15,7 +15,9 @@ namespace ConveyorTwin.Twin
         public double Value;           // 마지막으로 받아들인 값 (이상값은 반영하지 않음)
         public Quality Quality;
         public long Ts;                // 서버 발행 시각
-        public long ReceivedMs;        // 트윈 수신 시각
+        public long ReceivedMs;        // 받아들인 값의 트윈 수신 시각
+        /// <summary>마지막 도착 시각 (거부한 이상값 포함). stale은 "아무것도 안 옴"이라 이 값으로 판정한다</summary>
+        public long ArrivedMs;
         public bool HasValue;
 
         public long Rejected;          // 거부한 이상값 수
@@ -25,7 +27,11 @@ namespace ConveyorTwin.Twin
         public SignalValue(SignalSpec spec) => Spec = spec;
 
         /// <summary>주기 신호가 주기의 3배 동안 오지 않음 (SignalSpec.StaleAfterMs)</summary>
-        public bool IsStale(long nowMs) => Spec.StaleAfterMs > 0 && (!HasValue || nowMs - ReceivedMs > Spec.StaleAfterMs);
+        /// <remarks>
+        /// 이상값은 도착은 하므로 stale이 아니다. 같은 원인으로 알람이 두 개 뜨지 않게
+        /// "통신 문제(stale)"와 "센서 문제(이상값)"를 구분한다.
+        /// </remarks>
+        public bool IsStale(long nowMs) => Spec.StaleAfterMs > 0 && (ArrivedMs == 0 || nowMs - ArrivedMs > Spec.StaleAfterMs);
     }
 
     /// <summary>
@@ -70,12 +76,20 @@ namespace ConveyorTwin.Twin
         /// <summary>화면 지연이 이를 넘으면 경고</summary>
         const long ScreenDelayWarnMs = 1000;
         /// <summary>이상값 경고를 유지하는 시간</summary>
-        const long RejectAlarmHoldMs = 3000;
+        public const long RejectAlarmHoldMs = 3000;
+        /// <summary>
+        /// 트윈 쪽 알람 기준값. 측정 범위(SignalSpec)와 달리 "정상 운전으로 보기 어려운 값"이다.
+        /// 정상 운전 전류는 약 1.8~2.5A (docs/protocol.md 7절), 걸림 시 +1.2A
+        /// </summary>
+        public const double CurrentHighA = 3.0;
+        public const double TempHighC = 70.0;
 
         [SerializeField] Transform conveyorRoot;
         [SerializeField] string deviceId = Topics.DefaultDeviceId;
         [SerializeField] Color boxColor = new Color(0.76f, 0.60f, 0.42f);
         [SerializeField] Color jamColor = new Color(0.90f, 0.15f, 0.12f);
+        /// <summary>ConveyorTwin/StatusLit (Setup Scene이 지정. 빌드에 셰이더가 포함되도록 직접 참조)</summary>
+        [SerializeField] Shader statusShader;
 
         static readonly JsonSerializerSettings JsonSettings = new JsonSerializerSettings
         {
@@ -146,6 +160,16 @@ namespace ConveyorTwin.Twin
         public bool PlaybackHolding { get; private set; }
         /// <summary>재생 시각 당시의 벨트 속도 (화면에 쓰는 속도)</summary>
         public double PlaybackSpeed { get; private set; }
+        /// <summary>재생 시계 기준 벨트 표면 누적 이동 거리 (루프 길이로 감음)</summary>
+        public double BeltTravelM { get; private set; }
+        /// <summary>벨트 루프 전체 길이 = 2 × 드럼 간 거리 + 2πr</summary>
+        public static double BeltLoopLengthM => 2.0 * Equipment.BeltLengthM + 2.0 * Math.PI * BeltOuterRadiusM;
+        public TwinAlarms Alarms { get; } = new TwinAlarms();
+        readonly List<AlarmCondition> _conditions = new List<AlarmCondition>();
+        public Transform DrumHead => _drumHead;
+        public Transform DrumTail => _drumTail;
+        public Transform ConveyorRoot => conveyorRoot;
+        public const float BeltRadiusM = BeltOuterRadiusM;
         public readonly List<string> Warnings = new List<string>();
 
         void Awake()
@@ -161,11 +185,18 @@ namespace ConveyorTwin.Twin
 
             ResolveGeometry();
 
-            var lit = Shader.Find("Universal Render Pipeline/Lit");
-            _boxMaterial = new Material(lit);
+            // 상태 셰이더가 지정되어 있으면 잼 박스를 맥동 하이라이트로, 없으면 URP Lit 단색으로
+            var shader = statusShader != null ? statusShader : Shader.Find("Universal Render Pipeline/Lit");
+            _boxMaterial = new Material(shader);
             _boxMaterial.SetColor("_BaseColor", boxColor);
-            _jamMaterial = new Material(lit);
-            _jamMaterial.SetColor("_BaseColor", jamColor);
+            _jamMaterial = new Material(shader);
+            _jamMaterial.SetColor("_BaseColor", statusShader != null ? boxColor : jamColor);
+            if (statusShader != null)
+            {
+                _jamMaterial.SetColor("_HighlightColor", jamColor * 2.5f);
+                _jamMaterial.SetFloat("_HighlightStrength", 1f);
+                _jamMaterial.SetFloat("_PulseHz", 2f);
+            }
 
             _tracker = new ItemTracker(CreateBoxView);
             _tracker.Warning += AddWarning;
@@ -243,6 +274,9 @@ namespace ConveyorTwin.Twin
             var spin = Quaternion.AngleAxis((float)_drumAngleDeg, _drumAxis);
             _drumHead.rotation = spin * _drumHeadBase;
             _drumTail.rotation = spin * _drumTailBase;
+
+            EvaluateConditions(_conditions);
+            Alarms.Evaluate(_conditions, now);
         }
 
         /// <summary>
@@ -313,6 +347,8 @@ namespace ConveyorTwin.Twin
             _tracker.Tick(dt, speed);
             // 드럼 회전: 각속도 = 벨트 속도 / 반지름
             _drumAngleDeg = (_drumAngleDeg + speed / BeltOuterRadiusM * dt * Mathf.Rad2Deg) % 360.0;
+            // 벨트 표면 이동 거리 (셰이더 줄무늬용). 오래 돌아도 float 정밀도를 잃지 않게 루프 길이로 감는다
+            BeltTravelM = (BeltTravelM + speed * dt) % BeltLoopLengthM;
             _playbackMs = t;
         }
 
@@ -464,6 +500,7 @@ namespace ConveyorTwin.Twin
                 t.Quality == Quality.Bad ? "quality bad" :
                 !target.Spec.IsInRange(t.Value) ? $"측정 범위 밖 {t.Value} (유효 {target.Spec.ValidMin}~{target.Spec.ValidMax})" :
                 null;
+            target.ArrivedMs = receivedMs;
             if (reason != null)
             {
                 // 표시값은 마지막 정상값을 유지한다
@@ -482,26 +519,52 @@ namespace ConveyorTwin.Twin
             return true;
         }
 
-        /// <summary>지금 켜져 있는 이상 상태 (HUD 표시용. 10일 차에 알람·하이라이트로 확장)</summary>
-        public void CollectAlarms(List<string> into)
+        
+        /// <summary>
+        /// 지금 성립한 알람 조건. 트윈이 신호 조합으로 판단한다 (서버는 판단을 보내지 않음, 설계 원칙 2).
+        /// 키는 조건의 정체성이라 문구(경과 시간 등)가 바뀌어도 같은 알람으로 이어진다.
+        /// </summary>
+        void EvaluateConditions(List<AlarmCondition> into)
         {
             long now = NowMs();
             into.Clear();
-            if (!BrokerConnected) into.Add("브로커 연결 끊김");
-            if (DeviceOnline == false) into.Add("설비 오프라인");
-            if (RunState == Shared.RunState.Fault) into.Add($"모터 정지 ({RunReason})");
-            int jams = 0;
-            foreach (var i in _tracker.Items) if (i.Jammed) jams++;
-            if (jams > 0) into.Add($"잼: 출구 미감지 물건 {jams}개");
+            if (!BrokerConnected)
+                into.Add(new AlarmCondition("broker", AlarmSeverity.Critical, "브로커 연결 끊김: 트윈이 현실을 볼 수 없음"));
+            if (DeviceOnline == false)
+                into.Add(new AlarmCondition("offline", AlarmSeverity.Critical, "설비 오프라인 (Last Will): 화면은 마지막 수신 상태"));
+            if (RunState == Shared.RunState.Fault)
+                into.Add(new AlarmCondition("motor_fault", AlarmSeverity.Critical, $"모터 정지: {RunReason}"));
+            int jams = JammedCount;
+            if (jams > 0)
+                into.Add(new AlarmCondition("jam", AlarmSeverity.Critical, $"잼: 출구 미감지 물건 {jams}개 (입구 후 {Equipment.BeltLengthM * Equipment.JamTimeFactor:F2}m 이동)"));
+            if (Current.HasValue && Current.Value > CurrentHighA)
+                into.Add(new AlarmCondition("current_high", AlarmSeverity.Warning, $"모터 과전류 {Current.Value:F2}A (기준 {CurrentHighA}A): 부하 증가·걸림 의심"));
+            if (Temp.HasValue && Temp.Value > TempHighC)
+                into.Add(new AlarmCondition("temp_high", AlarmSeverity.Warning, $"모터 과열 {Temp.Value:F1}°C (기준 {TempHighC}°C)"));
             foreach (var s in new[] { Speed, Temp, Current })
             {
-                if (DeviceOnline == true && s.IsStale(now)) into.Add($"stale: {s.Spec.Name} ({(s.HasValue ? (now - s.ReceivedMs) / 1000.0 : 0):F1}s 무수신)");
-                if (now - s.LastRejectMs < RejectAlarmHoldMs) into.Add($"이상값: {s.Spec.Name} {s.LastRejectReason}");
+                if (DeviceOnline == true && s.IsStale(now))
+                    into.Add(new AlarmCondition("stale_" + s.Spec.Name, AlarmSeverity.Warning,
+                        $"stale: {s.Spec.Name} {(s.ArrivedMs > 0 ? (now - s.ArrivedMs) / 1000.0 : 0):F1}s 무수신"));
+                if (now - s.LastRejectMs < RejectAlarmHoldMs)
+                    into.Add(new AlarmCondition("reject_" + s.Spec.Name, AlarmSeverity.Warning,
+                        $"이상값 거부: {s.Spec.Name} {s.LastRejectReason}"));
             }
             long delay = ScreenDelayMs;
             if (DeviceOnline == true && delay > ScreenDelayWarnMs)
-                into.Add($"화면 지연 {delay / 1000.0:F1}s: 화면은 {delay / 1000.0:F1}초 전 상태 (서버 시각 기준 재생)");
-            if (_tracker.Resyncing) into.Add("추적 재동기화 중");
+                into.Add(new AlarmCondition("screen_delay", AlarmSeverity.Warning, $"화면 지연 {delay / 1000.0:F1}s (서버 시각 기준 재생)"));
+            if (_tracker.Resyncing)
+                into.Add(new AlarmCondition("resync", AlarmSeverity.Info, "물건 추적 재동기화 중"));
+        }
+
+        public int JammedCount
+        {
+            get
+            {
+                int n = 0;
+                foreach (var i in _tracker.Items) if (i.Jammed) n++;
+                return n;
+            }
         }
 
         /// <summary>

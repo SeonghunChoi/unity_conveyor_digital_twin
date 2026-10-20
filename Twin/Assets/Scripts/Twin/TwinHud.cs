@@ -21,7 +21,6 @@ namespace ConveyorTwin.Twin
 
         readonly StringBuilder _sb = new StringBuilder();
         double _rate = 1.0;
-        readonly List<string> _alarms = new List<string>();
 
         void Awake() => _twin = GetComponent<ConveyorTwinController>();
 
@@ -31,7 +30,6 @@ namespace ConveyorTwin.Twin
                 _style = new GUIStyle(GUI.skin.box) { alignment = TextAnchor.UpperLeft, fontSize = 14, richText = true };
 
             long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-            _twin.CollectAlarms(_alarms);
             _sb.Clear();
             int lines = 0;
             void Line(string s) { _sb.AppendLine(s); lines++; }
@@ -61,13 +59,44 @@ namespace ConveyorTwin.Twin
             if (_rate > CatchUpShowRate)
                 Line($"         <color=#6cf><b>▶▶ 따라잡는 중 ×{_rate:F1}</b></color> (밀린 구간을 빨리 재생: 화면 속도가 실제 설비 속도보다 빠름)");
 
-            Line(_alarms.Count == 0 ? "<b>상태     <color=#7f7>정상</color></b>" : "<b>상태</b>");
-            foreach (var a in _alarms)
-                Line($"  <color=#f66><b>● {a}</b></color>");
+            var alarms = _twin.Alarms;
+            Line(alarms.ActiveCount == 0
+                ? "<b>알람     <color=#7f7>없음</color></b>"
+                : $"<b>알람     활성 {alarms.ActiveCount}건, 미확인 {alarms.UnacknowledgedCount}건</b>");
+            int shown = 0;
+            foreach (var a in alarms.History)
+            {
+                // 활성이거나 미확인인 알람만 (해소·확인된 이력은 숨김)
+                if (!a.Active && a.Acknowledged) continue;
+                if (++shown > MaxAlarmLines) break;
+                Line(AlarmLine(a, now));
+            }
             foreach (var w in _twin.Warnings)
                 Line($"<color=#fc6>{w}</color>");
 
-            GUI.Box(new Rect(10, 10, 600, 16 + 20 * lines), _sb.ToString(), _style);
+            var box = new Rect(10, 10, 640, 16 + 20 * lines);
+            GUI.Box(box, _sb.ToString(), _style);
+            if (alarms.UnacknowledgedCount > 0 &&
+                GUI.Button(new Rect(box.x, box.yMax + 4, 160, 26), $"알람 확인 ({alarms.UnacknowledgedCount})"))
+                alarms.AcknowledgeAll();
+        }
+
+        const int MaxAlarmLines = 8;
+
+        /// <summary>
+        /// 알람 한 줄: 등급 색 + 상태. 활성·미확인 알람은 깜빡이고, 확인하면 고정, 해소되면 흐리게 (산업 HMI 관례)
+        /// </summary>
+        static string AlarmLine(Alarm a, long now)
+        {
+            string color = a.Severity == AlarmSeverity.Critical ? "#ff5555" : a.Severity == AlarmSeverity.Warning ? "#ffb347" : "#88c8ff";
+            string tag = a.Severity == AlarmSeverity.Critical ? "중대" : a.Severity == AlarmSeverity.Warning ? "경고" : "안내";
+            if (!a.Active) color = "#999999";
+            bool blink = a.Active && !a.Acknowledged && (now / 500) % 2 == 0;
+            string mark = blink ? "◆" : "◇";
+            long dur = (a.Active ? now : a.ClearedMs) - a.RaisedMs;
+            string state = a.Active ? (a.Acknowledged ? "확인됨" : "미확인") : "해소·미확인";
+            string time = DateTimeOffset.FromUnixTimeMilliseconds(a.RaisedMs).LocalDateTime.ToString("HH:mm:ss");
+            return $"  <color={color}><b>{mark} [{tag}]</b> {a.Text}</color>  <color=#aaa>{time}, {dur / 1000.0:F0}s, {state}</color>";
         }
 
         string Online()
