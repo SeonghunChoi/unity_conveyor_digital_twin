@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  컨베이어 트윈 HMI. 가운데는 비워 3D 트윈이 보이게 하고, 좌우에 값·알람을 둔다.
+  ISA-101 (고성능 HMI) 원칙: 정상 상태는 회색 계열, 색은 이상 상태에만 쓴다.
+  값은 TwinHmi.cs가 이름(name)으로 찾아 채운다.
+-->
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+    <Style src="TwinHmi.uss" />
+    <ui:VisualElement name="root" class="root" picking-mode="Ignore">
+
+        <!-- 상단: 설비 이름, 연결 상태, 시계 -->
+        <ui:VisualElement class="topbar">
+            <ui:VisualElement class="title-block">
+                <ui:Label text="Conveyor01" class="title" />
+                <ui:Label text="벨트 컨베이어 디지털 트윈 · mk GUF-P 2000" class="subtitle" />
+            </ui:VisualElement>
+            <ui:VisualElement class="chips">
+                <ui:VisualElement name="chip-broker" class="chip"><ui:Label text="브로커" class="chip-label" /><ui:Label name="chip-broker-value" text="-" class="chip-value" /></ui:VisualElement>
+                <ui:VisualElement name="chip-device" class="chip"><ui:Label text="설비" class="chip-label" /><ui:Label name="chip-device-value" text="-" class="chip-value" /></ui:VisualElement>
+                <ui:VisualElement name="chip-server" class="chip chip-with-action">
+                    <ui:VisualElement><ui:Label text="서버" class="chip-label" /><ui:Label name="chip-server-value" text="-" class="chip-value" /></ui:VisualElement>
+                    <ui:Button name="btn-launch" text="실행" class="btn btn-small hidden" />
+                </ui:VisualElement>
+                <ui:VisualElement name="chip-data" class="chip"><ui:Label text="데이터" class="chip-label" /><ui:Label name="chip-data-value" text="-" class="chip-value" /></ui:VisualElement>
+            </ui:VisualElement>
+            <ui:VisualElement class="clock-block">
+                <ui:Label name="clock" text="00:00:00" class="clock" />
+                <ui:Button name="btn-diag" text="진단" class="btn" />
+            </ui:VisualElement>
+        </ui:VisualElement>
+
+        <ui:VisualElement class="body" picking-mode="Ignore">
+            <!-- 왼쪽: 운전 상태와 측정값 -->
+            <ui:VisualElement class="column left">
+                <ui:VisualElement name="card-run" class="card run-card">
+                    <ui:Label text="운전 상태" class="card-title" />
+                    <ui:Label name="run-state" text="-" class="run-state" />
+                    <ui:Label name="run-reason" text=" " class="muted" />
+                </ui:VisualElement>
+
+                <ui:VisualElement name="kpi-speed" class="card kpi">
+                    <ui:VisualElement class="kpi-head">
+                        <ui:Label text="벨트 속도" class="card-title" />
+                        <ui:Label name="kpi-speed-meta" text="-" class="kpi-meta" />
+                    </ui:VisualElement>
+                    <ui:VisualElement class="kpi-value-row">
+                        <ui:Label name="kpi-speed-value" text="-" class="kpi-value" />
+                        <ui:Label text="m/s" class="kpi-unit" />
+                    </ui:VisualElement>
+                    <ui:VisualElement name="kpi-speed-bar" class="bar"><ui:VisualElement class="bar-band" /><ui:VisualElement class="bar-fill" /></ui:VisualElement>
+                    <ui:VisualElement name="kpi-speed-trend" class="trend" />
+                </ui:VisualElement>
+
+                <ui:VisualElement name="kpi-temp" class="card kpi">
+                    <ui:VisualElement class="kpi-head">
+                        <ui:Label text="모터 온도" class="card-title" />
+                        <ui:Label name="kpi-temp-meta" text="-" class="kpi-meta" />
+                    </ui:VisualElement>
+                    <ui:VisualElement class="kpi-value-row">
+                        <ui:Label name="kpi-temp-value" text="-" class="kpi-value" />
+                        <ui:Label text="°C" class="kpi-unit" />
+                    </ui:VisualElement>
+                    <ui:VisualElement name="kpi-temp-bar" class="bar"><ui:VisualElement class="bar-band" /><ui:VisualElement class="bar-fill" /></ui:VisualElement>
+                    <ui:VisualElement name="kpi-temp-trend" class="trend" />
+                </ui:VisualElement>
+
+                <ui:VisualElement name="kpi-current" class="card kpi">
+                    <ui:VisualElement class="kpi-head">
+                        <ui:Label text="모터 전류" class="card-title" />
+                        <ui:Label name="kpi-current-meta" text="-" class="kpi-meta" />
+                    </ui:VisualElement>
+                    <ui:VisualElement class="kpi-value-row">
+                        <ui:Label name="kpi-current-value" text="-" class="kpi-value" />
+                        <ui:Label text="A" class="kpi-unit" />
+                    </ui:VisualElement>
+                    <ui:VisualElement name="kpi-current-bar" class="bar"><ui:VisualElement class="bar-band" /><ui:VisualElement class="bar-fill" /></ui:VisualElement>
+                    <ui:VisualElement name="kpi-current-trend" class="trend" />
+                </ui:VisualElement>
+            </ui:VisualElement>
+
+            <!-- 가운데: 3D 트윈이 보이는 영역. 화면 지연·오프라인 안내만 띄운다 -->
+            <ui:VisualElement class="center" picking-mode="Ignore">
+                <ui:VisualElement name="banner" class="banner hidden" picking-mode="Ignore">
+                    <ui:Label name="banner-text" text="" class="banner-text" />
+                </ui:VisualElement>
+            </ui:VisualElement>
+
+            <!-- 오른쪽: 물건 추적과 알람 -->
+            <ui:VisualElement class="column right">
+                <ui:VisualElement class="card">
+                    <ui:Label text="물건 추적" class="card-title" />
+                    <ui:VisualElement class="stat-grid">
+                        <ui:VisualElement class="stat"><ui:Label text="벨트 위" class="stat-label" /><ui:Label name="stat-onbelt" text="-" class="stat-value" /></ui:VisualElement>
+                        <ui:VisualElement class="stat"><ui:Label text="처리량 (개/분)" class="stat-label" /><ui:Label name="stat-throughput" text="-" class="stat-value" /></ui:VisualElement>
+                        <ui:VisualElement class="stat"><ui:Label text="입구 / 출구" class="stat-label" /><ui:Label name="stat-inout" text="-" class="stat-value small" /></ui:VisualElement>
+                        <ui:VisualElement class="stat"><ui:Label text="최근 무게" class="stat-label" /><ui:Label name="stat-weight" text="-" class="stat-value small" /></ui:VisualElement>
+                    </ui:VisualElement>
+                    <ui:Label name="stat-note" text=" " class="muted" />
+                </ui:VisualElement>
+
+                <ui:VisualElement name="card-alarms" class="card alarms">
+                    <ui:VisualElement class="alarm-head">
+                        <ui:Label text="알람" class="card-title" />
+                        <ui:Label name="alarm-counts" text="없음" class="alarm-counts" />
+                        <ui:Button name="btn-ack" text="확인" class="btn btn-ack" />
+                    </ui:VisualElement>
+                    <ui:VisualElement name="alarm-list" class="alarm-list" />
+                    <ui:Label name="alarm-empty" text="활성 알람 없음" class="muted alarm-empty" />
+                </ui:VisualElement>
+            </ui:VisualElement>
+        </ui:VisualElement>
+
+        <!-- 서버 연결 불가 다이얼로그: 트윈이 몰래 되살리지 않고 운전자에게 묻는다 (시연 편의 기능) -->
+        <ui:VisualElement name="dialog-overlay" class="overlay hidden">
+            <ui:VisualElement class="dialog">
+                <ui:Label text="서버(가상 설비)에 연결할 수 없습니다" class="dialog-title" />
+                <ui:Label name="dialog-body" text="" class="dialog-body" />
+                <ui:Label text="※ 시연용 기능입니다. 실제 현장에서 트윈은 설비를 재시작하지 않고 점검을 요청합니다." class="muted dialog-note" />
+                <ui:VisualElement class="dialog-buttons">
+                    <ui:Button name="btn-dialog-later" text="나중에" class="btn" />
+                    <ui:Button name="btn-dialog-launch" text="서버 실행" class="btn btn-primary" />
+                </ui:VisualElement>
+            </ui:VisualElement>
+        </ui:VisualElement>
+    </ui:VisualElement>
+</ui:UXML>

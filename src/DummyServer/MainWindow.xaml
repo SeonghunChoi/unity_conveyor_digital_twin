@@ -86,9 +86,9 @@
                     <GridViewColumn Header="시각" Width="95" DisplayMemberBinding="{Binding Time, StringFormat=HH:mm:ss.fff}"/>
                     <GridViewColumn Header="토픽" Width="280" DisplayMemberBinding="{Binding Topic}"/>
                     <GridViewColumn Header="QoS" Width="40" DisplayMemberBinding="{Binding Qos}"/>
-                    <GridViewColumn Header="R" Width="30" DisplayMemberBinding="{Binding Retained}"/>
+                    <GridViewColumn Header="R" Width="50" DisplayMemberBinding="{Binding Retained}"/>
                     <GridViewColumn Header="장애 처리" Width="170" DisplayMemberBinding="{Binding Note}"/>
-                    <GridViewColumn Header="페이로드" Width="520" DisplayMemberBinding="{Binding Payload}"/>
+                    <GridViewColumn Header="페이로드" Width="500" DisplayMemberBinding="{Binding Payload}"/>
                 </GridView>
             </ListView.View>
         </ListView>
