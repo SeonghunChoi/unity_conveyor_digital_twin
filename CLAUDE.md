@@ -76,7 +76,7 @@ claude.ai에서 진행한 기획 대화의 결정 사항을 옮겨 왔습니다.
 | 8~9 | 장애 버튼 + 트윈 대응 로직, 잼 판단 ★ | ✅ 완료 (서버 시각 기준 재생, 6종 장애 Unity 확인) |
 | 10 | 상태별 셰이더 하이라이트, 알람 | ✅ 완료 (StatusLit 셰이더, 벨트 흐름, ISA-18.2식 알람) |
 | 11~12 | HMI 대시보드, 연결 상태 표시, 서버 자동 실행 | ✅ 완료 (UI Toolkit HMI, 서버 자동 실행·재실행 확인) |
-| 13 | 단일 exe 배포, 클린 PC 실행 테스트 | |
+| 13 | 단일 exe 배포, 클린 PC 실행 테스트 | ✅ 완료 (`Tools/Twin/Build Release` → `dist/`, Windows 샌드박스에서 실행 확인) |
 | 14 | README, 아키텍처 구조도 | |
 | 15 | 시연 대본, 영상 촬영·편집 | |
 
@@ -105,6 +105,7 @@ README에는 구조도, 페이로드 규약, 장애 시나리오, CAD 출처·�
 dotnet build src/Shared            # 빌드 + Twin/Assets/Plugins/Shared 로 DLL 자동 복사
 dotnet build src                   # 솔루션 전체 (DummyServer, Shared, UnityPlugins). Shared·MQTTnet DLL을 Twin/Assets/Plugins로 복사
 dotnet run --project src/DummyServer  # 더미 서버 실행 (브로커 127.0.0.1:1883 + 가상 컨베이어)
+# 배포 빌드: Unity 메뉴 Tools/Twin/Build Release → dist/ConveyorTwin/ (트윈 + Server/ 단일 exe, gitignore)
 ```
 
 - DLL 복사는 `Twin/Assets`가 있을 때만 일어난다 (csproj의 `CopyToUnity` 타깃). 복사된 DLL은 `.gitignore` 대상이므로,

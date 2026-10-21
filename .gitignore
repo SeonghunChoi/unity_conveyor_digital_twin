@@ -1,3 +1,6 @@
+# ---------- 배포 빌드 (Tools/Twin/Build Release, CAD 변환 메시 포함) ----------
+dist/
+
 # ---------- .NET ----------
 bin/
 obj/

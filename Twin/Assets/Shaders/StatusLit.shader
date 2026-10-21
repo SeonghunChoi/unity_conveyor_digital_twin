@@ -69,7 +69,9 @@ Shader "ConveyorTwin/StatusLit"
             #pragma vertex Vert
             #pragma fragment Frag
 
-            #pragma shader_feature_local _BELT_FLOW
+            // multi_compile: 벨트 머티리얼은 런타임(TwinVisuals)에 키워드를 켜므로, shader_feature로 두면
+            // 빌드에 그 키워드를 쓰는 머티리얼 에셋이 없어 변형이 스트리핑되고 빌드에서만 줄무늬가 사라진다
+            #pragma multi_compile_local _ _BELT_FLOW
             #pragma multi_compile _ _MAIN_LIGHT_SHADOWS _MAIN_LIGHT_SHADOWS_CASCADE
             #pragma multi_compile_fragment _ _SHADOWS_SOFT _SHADOWS_SOFT_LOW _SHADOWS_SOFT_MEDIUM _SHADOWS_SOFT_HIGH
             #pragma multi_compile_fog

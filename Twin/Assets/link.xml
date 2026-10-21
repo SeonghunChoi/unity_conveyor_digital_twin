@@ -1,0 +1,9 @@
+<!--
+  관리 코드 스트리핑에서 보존할 어셈블리.
+  Newtonsoft JSON이 리플렉션으로 Shared의 메시지 타입(속성 setter)을 만들고, MQTTnet도 내부에서 리플렉션을 쓴다.
+  빌드에서 이 코드가 잘려 나가면 에디터에서는 되는데 빌드에서만 역직렬화가 실패한다.
+-->
+<linker>
+    <assembly fullname="ConveyorTwin.Shared" preserve="all" />
+    <assembly fullname="MQTTnet" preserve="all" />
+</linker>

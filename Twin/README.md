@@ -108,6 +108,38 @@ ISA-101(고성능 HMI) 원칙에 따라 **정상은 회색, 색은 이상 상태
 - 프로세스는 있는데 응답이 없으면 실행을 권하지 않는다 (같은 포트로 두 번째 서버가 뜨면 충돌). "응답 없음 · 서버 창 확인"으로 안내한다.
 - 트윈을 닫아도 서버는 끄지 않는다. 트윈을 다시 켜면 같은 세션에 이어 붙는다.
 
+## 배포 빌드 (13일 차)
+
+메뉴 `Tools/Twin/Build Release` (`Assets/Editor/TwinBuild.cs`) 하나로 저장소 루트의 `dist/ConveyorTwin/`을 만든다.
+
+```
+dist/ConveyorTwin/
+  ConveyorTwin.exe, ConveyorTwin_Data/, UnityPlayer.dll, MonoBleedingEdge/, D3D12/   트윈 (Unity, Mono, 약 102MB)
+  Server/ConveyorTwin.DummyServer.exe                                              더미 서버 (self-contained 단일 exe, 압축 약 68MB)
+  실행방법.txt
+```
+
+- 받는 사람은 `ConveyorTwin.exe`만 실행하면 된다. `ServerLauncher`가 `Server/`에서 서버를 찾아 띄운다. .NET 설치는 필요 없다.
+- 명령줄 빌드 (에디터를 닫은 상태):
+  `Unity.exe -batchmode -quit -projectPath Twin -executeMethod ConveyorTwin.EditorTools.TwinBuild.BuildReleaseBatch -logFile build.log`
+- 사전 조건: CAD glb와 한글 폰트 에셋(Setup Scene이 생성)이 있어야 한다. 없으면 빌드가 멈추고 이유를 알려 준다.
+- `dist/`는 git에서 제외한다. **CAD 변환 메시가 들어 있으므로 공개 배포 전에 mk CAD 이용 조건을 확인해야 한다.**
+
+클린 PC 테스트: `tools/build/sandbox_test.ps1`이 Windows 샌드박스(설치 프로그램이 없는 깨끗한 Windows)에
+빌드 폴더를 읽기 전용으로 연결하고 네트워크를 끈 채 띄운다. 샌드박스 기능은 `Windows 기능 켜기/끄기`에서 켠다 (관리자·재부팅 필요).
+
+2026-10-21 확인 결과 (.NET·Unity·VC++ 런타임이 없는 샌드박스, 네트워크 끔, 빌드 폴더 읽기 전용):
+`ConveyorTwin.exe` 실행 → 서버 자동 실행, HMI 한글 표시, 3D 모델·벨트 흐름·박스 이동, 장애 버튼 반응 모두 정상.
+즉 배포물이 별도 설치 없이 실행되고, 자기 폴더에 쓰지 않으며, 외부 네트워크 없이 동작한다.
+
+빌드에서만 생긴 문제와 해결:
+
+| 증상 | 원인 | 해결 |
+| --- | --- | --- |
+| 빌드에서만 벨트 줄무늬가 없음 | `shader_feature`는 빌드에 포함된 머티리얼 에셋이 쓰는 키워드 변형만 남긴다. 벨트 키워드는 런타임에 켜서 변형이 스트리핑됨 | `multi_compile_local`로 변경 |
+| `*_BurstDebugInformation_DoNotShip` 폴더 | Burst(Collections 패키지 의존성)의 디버그 정보 | 빌드 스크립트가 삭제 |
+| (예방) 역직렬화 실패 가능성 | 관리 코드 스트리핑이 Newtonsoft·MQTTnet이 리플렉션으로 쓰는 코드를 지울 수 있음 | `Assets/link.xml`로 Shared·MQTTnet 보존 |
+
 ## 좌표
 
 반송 방향 = Unity +Z (입구 센서 = `Drum_Tail`, 출구 센서 = `Drum_Head`). 센서 위치와 방향은 CAD 드럼 위치에서 런타임에 읽는다.
