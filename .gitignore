@@ -41,3 +41,6 @@ Twin/Assets/ThirdParty/Cad.meta
 # ---------- 폰트 (OS 맑은 고딕 글리프가 아틀라스에 쌓이므로 재배포 금지. Setup Scene이 생성) ----------
 Twin/Assets/ThirdParty/Fonts/
 Twin/Assets/ThirdParty/Fonts.meta
+
+# ---------- 시연 영상 원본 (YouTube에 공개, 용량이 커서 저장소 제외) ----------
+docs/movies/
