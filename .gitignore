@@ -31,6 +31,8 @@ Twin/Assets/Plugins/Shared.meta
 # MQTTnet.dll도 빌드 산출물 (src/UnityPlugins 빌드 시 NuGet에서 받아 복사)
 Twin/Assets/Plugins/MQTTnet/
 Twin/Assets/Plugins/MQTTnet.meta
+Twin/Assets/Plugins/OpcUa/
+Twin/Assets/Plugins/OpcUa.meta
 
 # ---------- CAD (라이선스상 원본·변환본 재배포 금지) ----------
 cad/*

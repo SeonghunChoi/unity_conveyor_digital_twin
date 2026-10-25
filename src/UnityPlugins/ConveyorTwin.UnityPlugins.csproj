@@ -4,7 +4,10 @@
        코드는 없다. 버전은 여기서만 관리하고, 복사된 DLL은 Shared DLL과 마찬가지로 커밋하지 않는다.
 
        MQTTnet: 서버는 5.x를 쓰지만 5.x는 net8.0/net10.0 전용이라 Unity에서 쓸 수 없다.
-       4.3.x의 netstandard2.1 빌드를 쓴다 (두 쪽은 MQTT 프로토콜로만 통신하므로 버전 차이는 무관). -->
+       4.3.x의 netstandard2.1 빌드를 쓴다 (두 쪽은 MQTT 프로토콜로만 통신하므로 버전 차이는 무관).
+
+       OPC UA (2단계): OPC Foundation UA-.NETStandard. 2.0부터 netstandard2.1 빌드가 없어 1.5.378.x 계열에 고정한다.
+       의존 DLL을 모두 복사하되 Newtonsoft.Json은 Unity 패키지(com.unity.nuget.newtonsoft-json)와 겹치므로 뺀다. -->
   <PropertyGroup>
     <TargetFramework>netstandard2.1</TargetFramework>
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
@@ -13,14 +16,20 @@
 
   <ItemGroup>
     <PackageReference Include="MQTTnet" Version="4.3.7.1207" />
+    <PackageReference Include="OPCFoundation.NetStandard.Opc.Ua.Client" Version="1.5.378.182" />
   </ItemGroup>
 
   <PropertyGroup>
     <UnityMqttDir>$(MSBuildProjectDirectory)/../../Twin/Assets/Plugins/MQTTnet</UnityMqttDir>
+    <UnityOpcUaDir>$(MSBuildProjectDirectory)/../../Twin/Assets/Plugins/OpcUa</UnityOpcUaDir>
   </PropertyGroup>
   <Target Name="CopyToUnity" AfterTargets="Build" Condition="Exists('$(MSBuildProjectDirectory)/../../Twin/Assets')">
-    <MakeDir Directories="$(UnityMqttDir)" />
+    <ItemGroup>
+      <OpcUaDlls Include="$(OutDir)*.dll" Exclude="$(OutDir)MQTTnet.dll;$(OutDir)Newtonsoft.Json.dll;$(OutDir)$(AssemblyName).dll" />
+    </ItemGroup>
+    <MakeDir Directories="$(UnityMqttDir);$(UnityOpcUaDir)" />
     <Copy SourceFiles="$(OutDir)MQTTnet.dll" DestinationFolder="$(UnityMqttDir)" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(OpcUaDlls)" DestinationFolder="$(UnityOpcUaDir)" SkipUnchangedFiles="true" />
   </Target>
 
 </Project>

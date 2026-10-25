@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- 2단계 1일 차 스파이크: Unity 배포 빌드의 OPC UA 클라이언트가 접속할 최소 서버.
+       3일 차에 DummyServer로 옮기기 전까지만 쓰는 버림용 코드이며 솔루션에 넣지 않는다.
+       Unity 쪽(src/UnityPlugins)과 같은 1.5.378.x 스택을 쓴다. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <NoWarn>CS0618</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="OPCFoundation.NetStandard.Opc.Ua.Server" Version="1.5.378.182" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="10.0.8" />
+  </ItemGroup>
+
+</Project>

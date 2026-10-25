@@ -6,4 +6,10 @@
 <linker>
     <assembly fullname="ConveyorTwin.Shared" preserve="all" />
     <assembly fullname="MQTTnet" preserve="all" />
+    <!-- OPC UA 스택(2단계): 인코더·서비스 타입을 리플렉션으로 찾는다 -->
+    <assembly fullname="Opc.Ua.Core" preserve="all" />
+    <assembly fullname="Opc.Ua.Types" preserve="all" />
+    <assembly fullname="Opc.Ua.Client" preserve="all" />
+    <assembly fullname="Opc.Ua.Configuration" preserve="all" />
+    <assembly fullname="Opc.Ua.Security.Certificates" preserve="all" />
 </linker>
