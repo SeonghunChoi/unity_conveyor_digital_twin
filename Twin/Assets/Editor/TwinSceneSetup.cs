@@ -23,21 +23,30 @@ namespace ConveyorTwin.EditorTools
         const string KoreanFontPath = "Assets/ThirdParty/Fonts/KoreanOSFont.asset";
 
         [MenuItem("Tools/Twin/Setup Scene")]
-        static void Setup()
+        static void SetupMenu() => Setup();
+
+        /// <summary>명령줄: Unity.exe -batchmode -quit -projectPath Twin -executeMethod ConveyorTwin.EditorTools.TwinSceneSetup.SetupBatch</summary>
+        public static void SetupBatch() => EditorApplication.Exit(Setup() ? 0 : 1);
+
+        static bool Setup()
         {
             var glb = AssetDatabase.LoadAssetAtPath<GameObject>(GlbPath);
             if (glb == null)
             {
-                EditorUtility.DisplayDialog("Twin", $"{GlbPath} 이 없습니다.\ntools/cad/export_conveyor.py를 먼저 실행하세요.", "확인");
-                return;
+                if (Application.isBatchMode) Debug.LogError($"[Twin] {GlbPath} 이 없습니다. tools/cad/export_conveyor.py를 먼저 실행하세요.");
+                else EditorUtility.DisplayDialog("Twin", $"{GlbPath} 이 없습니다.\ntools/cad/export_conveyor.py를 먼저 실행하세요.", "확인");
+                return false;
             }
             if (!EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo())
-                return;
+                return false;
 
             var scene = EditorSceneManager.NewScene(NewSceneSetup.DefaultGameObjects, NewSceneMode.Single);
 
             var conveyor = (GameObject)PrefabUtility.InstantiatePrefab(glb);
             conveyor.name = "Conveyor";
+
+            // 2단계 로봇 셀 (로봇 glb가 없으면 건너뛴다)
+            RobotCellBuilder.Build();
 
             // 상태 셰이더는 직접 참조해야 플레이어 빌드에 포함된다 (Shader.Find만으로는 빠질 수 있음)
             var statusShader = AssetDatabase.LoadAssetAtPath<Shader>(StatusShaderPath);
@@ -70,12 +79,12 @@ namespace ConveyorTwin.EditorTools
             hso.FindProperty("koreanFont").objectReferenceValue = GetOrCreateKoreanFont();
             hso.ApplyModifiedPropertiesWithoutUndo();
 
-            // 좌우 패널 사이로 벨트 전체가 보이게: 입구(-Z) 쪽 비스듬한 위
+            // 좌우 패널 사이로 벨트와 로봇 셀(팔레트는 −X 쪽)이 함께 보이게: 입구(-Z)·팔레트 쪽 비스듬한 위
             var cam = Camera.main;
             if (cam != null)
             {
-                cam.transform.position = new Vector3(1.75f, 1.75f, -2.35f);
-                cam.transform.LookAt(new Vector3(0f, 0.7f, 0.15f));
+                cam.transform.position = new Vector3(-2.6f, 2.5f, -2.2f);
+                cam.transform.LookAt(new Vector3(-0.35f, 0.6f, 0.75f));
                 cam.nearClipPlane = 0.05f;
                 cam.fieldOfView = 50f;
             }
@@ -86,6 +95,7 @@ namespace ConveyorTwin.EditorTools
             EditorSceneManager.SaveScene(scene, ScenePath);
             EditorBuildSettings.scenes = new[] { new EditorBuildSettingsScene(ScenePath, true) };
             Debug.Log($"[Twin] {ScenePath} 생성 완료. Play하면 서버가 없을 때 자동으로 실행합니다.");
+            return true;
         }
 
         /// <summary>

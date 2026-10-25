@@ -54,6 +54,8 @@ claude.ai에서 진행한 기획 대화의 결정 사항을 옮겨 왔습니다.
 - `SignalSpec`/`Signals`: **하나의 사양을 서버와 트윈이 반대 용도로 쓴다.** 서버는 주기·범위·QoS·Retained로 값을 생성·발행하고,
   트윈은 같은 사양으로 이상값(`IsInRange`)과 stale(`StaleAfterMs` = 주기 × 3, 이벤트성은 0)을 판정한다. 신호를 추가하면 여기와 `Topics`에 함께 넣는다.
 - `Equipment`: 벨트 길이(1.95m)와 잼 판단 배수(1.5). 서버는 물건 이동 시뮬레이션에, 트윈은 잼 판단에 쓴다.
+- `RobotCell` (2단계): 로봇 셀 배치·적재 패턴. 좌표는 **로봇 베이스 좌표계**(ABB base frame, m, Z-up 오른손, +X = 컨베이어 쪽).
+  트윈에서 Unity 월드 = (0, 0, 1.70) + (y, z, −x). 박스 크기는 1단계 값(0.30×0.20×0.15)과 같아야 한다. 상세 `docs/robot-cell.md`.
 - `Messages`: 데이터 메시지는 모두 `Envelope`(sid/seq/ts)를 상속한다. 예외로 `StatusMessage`는 seq가 없다 (Last Will로 브로커가 대신 발행하므로).
   트윈의 seq 기록은 `status`의 sid가 바뀔 때 초기화된다.
 - 직렬화는 양쪽 모두 Newtonsoft JSON에 camelCase 네이밍 + 소문자 문자열 enum 설정을 각자 해야 `docs/protocol.md`의 페이로드와 맞는다.
@@ -104,8 +106,8 @@ claude.ai에서 진행한 기획 대화의 결정 사항을 옮겨 왔습니다.
 
 | 일차 | 작업 | 상태 |
 | --- | --- | --- |
-| 1 | 로봇 기종·CAD 확정, 셀 배치, OPC UA 스파이크 (Unity 배포 빌드에서 접속 확인) | 🔶 스파이크 완료 (None·Basic256Sha256·Aes128 통과), 기종·CAD 확정·구조 분석 완료, 셀 배치 남음 (2일 차 임포트 후 실측) |
-| 2 | 로봇 CAD 변환 (기존 파이프라인 재사용), 관절 피벗·계층 정리, 그리퍼·팔레트 | 🔶 관절 계층 glb·Unity 축 검증 완료, 그리퍼·팔레트·셀 배치 남음 |
+| 1 | 로봇 기종·CAD 확정, 셀 배치, OPC UA 스파이크 (Unity 배포 빌드에서 접속 확인) | ✅ 완료 (`docs/opcua-spike.md`, `docs/cad-robot.md`) |
+| 2 | 로봇 CAD 변환 (기존 파이프라인 재사용), 관절 피벗·계층 정리, 그리퍼·팔레트 | ✅ 완료 (관절 계층 glb, 진공 그리퍼·EUR 팔레트, 셀 배치 48칸 도달 확인 `docs/robot-cell.md`) |
 | 3 | 서버 OPC UA 서버 골격, 로봇 정보 모델 (관절각, 모드, 프로그램 상태, 그리퍼, 사이클 수) | |
 | 4 | 서버 가상 로봇 컨트롤러: 관절 공간 보간, 출구 도착 → 픽 사이클, 팔레트 적재 패턴 | |
 | 5 | 트윈 OPC UA 클라이언트: 구독, StatusCode·SourceTimestamp 검증, 재연결 | |
@@ -163,6 +165,8 @@ dotnet run --project src/DummyServer  # 더미 서버 실행 (브로커 127.0.0.
 - OCCT writer는 B-rep 면마다 primitive를 만들므로(약 4,000개) 스크립트가 메시별로 하나로 병합한 뒤
   `Twin/Assets/ThirdParty/Cad/conveyor.glb`로 복사한다 (gitignore 대상). Unity 쪽은 glTFast 기본 임포트만 쓴다.
 - 트윈 씬은 메뉴 `Tools/Twin/Setup Scene`이 glb로 다시 구성한다 (`Assets/Scenes/Twin.unity`). 트윈 구조·추정 방식은 `Twin/README.md`.
+  로봇 glb가 있으면 `RobotCellBuilder`가 로봇·그리퍼·팔레트도 놓는다. 배치모드: `-executeMethod ConveyorTwin.EditorTools.TwinSceneSetup.SetupBatch`.
+- 셀 점검: `Tools/Twin/Check Robot Cell` (`RobotCellCheck.CheckBatch`) — 픽 위치 실측 비교, 48칸 IK 도달·가동 범위, TCP 오차, `dist/cellcheck/*.png` 캡처.
 - Unity 점검: 메뉴 `Tools/CAD/Check Conveyor Import` (`Twin/Assets/Editor/CadImportCheck.cs`)가 서브메시·축·드럼 간 거리를 콘솔에 출력한다.
 - **Unity 좌표 (2026-10-20 확인)**: 1유닛 = 1m, 반송 방향 = Unity **+Z** (Drum_Tail z=-0.975 → Drum_Head z=+0.975),
   벨트 윗면 y≈0.850, 드럼 축 y=0.823. glTFast가 X를 반전하므로 구동부·제어 박스는 +X 쪽에 있다.
