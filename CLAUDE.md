@@ -91,7 +91,12 @@ claude.ai에서 진행한 기획 대화의 결정 사항을 옮겨 왔습니다.
 - **물건 인계**: 서버는 출구 도착 → 픽 → 팔레트 적재를 시뮬레이션하고, 트윈은 1단계 FIFO 추적을 이어받아 그리퍼·팔레트로 넘긴다.
 - **OPC UA 스택**: OPC Foundation UA-.NETStandard (MIT). Unity는 netstandard2.1을 포함한 마지막 계열인 **1.5.378.x**만 쓸 수 있다
   (2.0은 net8+/net48 전용, MQTTnet 4/5와 같은 상황). 서버도 같은 1.5.378.x로 맞춘다. 기본 포트 4840.
-- **기종(잠정)**: 박스 2~15kg + 그리퍼 → 가반하중 20kg급 6축 (예: IRB 2600-20). ABB CAD 제공 여부를 보고 1일 차에 확정.
+- **기종(확정)**: **IRB 2600-20/1.65** (6축, 가반 20kg, 도달 1.65m). CAD는 ABB Library 9AKK107492A4717 STEP을 `cad/irb2600/`에 둔다.
+  링크별 파일로 나뉘어 있고 홈 자세 좌표 그대로다. 관절 축(mm, STEP Z-up): J1 Z@(0,0,0), J2 Y@(150,0,445), J3 Y@(150,0,1145),
+  J4 X@z1260, J5 Y@(945,0,1260), J6 X@z1260, 플랜지 x=1030. 분석: `tools/cad/inspect_robot.py`, 상세 `docs/cad-robot.md`.
+- **로봇 glb (2일 차)**: `tools/cad/export_robot.py` → `cad/irb2600.glb` (+ `Twin/Assets/ThirdParty/Cad/`), 계층 `Robot/Base/J1/…/J6`.
+  Unity에서 팔은 홈 자세에 −X로 뻗는다. 트윈은 `localRotation = AngleAxis(θ, 축)`, 축 J1 (0,−1,0) / J2·J3·J5 (0,0,1) / J4·J6 (1,0,0)
+  (거울 반전 때문에 STEP 축을 옮긴 방향의 반대. `Tools/CAD/Check Robot Import`가 FK로 검증).
 - **Mono 제약 (1일 차 스파이크, `docs/opcua-spike.md`)**: Unity 배포 빌드(Mono)에서 OPC UA 접속·구독은 되지만
   ① 스택의 TCP 접속이 Mono에서 실패하므로 `MonoTcpTransport`로 `opc.tcp` 바인딩을 교체해야 하고,
   ② Mono는 자체 서명 인증서를 만들지 못하므로 클라이언트 인증서를 .NET 쪽에서 발급해 넣어야 한다.
@@ -99,8 +104,8 @@ claude.ai에서 진행한 기획 대화의 결정 사항을 옮겨 왔습니다.
 
 | 일차 | 작업 | 상태 |
 | --- | --- | --- |
-| 1 | 로봇 기종·CAD 확정, 셀 배치, OPC UA 스파이크 (Unity 배포 빌드에서 접속 확인) | 🔶 스파이크 완료 (None·Basic256Sha256·Aes128 통과), 기종·CAD·배치 남음 |
-| 2 | 로봇 CAD 변환 (기존 파이프라인 재사용), 관절 피벗·계층 정리, 그리퍼·팔레트 | |
+| 1 | 로봇 기종·CAD 확정, 셀 배치, OPC UA 스파이크 (Unity 배포 빌드에서 접속 확인) | 🔶 스파이크 완료 (None·Basic256Sha256·Aes128 통과), 기종·CAD 확정·구조 분석 완료, 셀 배치 남음 (2일 차 임포트 후 실측) |
+| 2 | 로봇 CAD 변환 (기존 파이프라인 재사용), 관절 피벗·계층 정리, 그리퍼·팔레트 | 🔶 관절 계층 glb·Unity 축 검증 완료, 그리퍼·팔레트·셀 배치 남음 |
 | 3 | 서버 OPC UA 서버 골격, 로봇 정보 모델 (관절각, 모드, 프로그램 상태, 그리퍼, 사이클 수) | |
 | 4 | 서버 가상 로봇 컨트롤러: 관절 공간 보간, 출구 도착 → 픽 사이클, 팔레트 적재 패턴 | |
 | 5 | 트윈 OPC UA 클라이언트: 구독, StatusCode·SourceTimestamp 검증, 재연결 | |
