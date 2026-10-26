@@ -36,6 +36,10 @@ namespace ConveyorTwin.EditorTools
         static bool _wasHolding;
         static int _lastPalletCount;
         static int _grips, _releases, _maxJams;
+        // 트윈이 관절을 지어내지 않는지 (사용자 보고: 비상정지 중 로봇이 계속 움직이고 관절이 446°까지 감)
+        static int _limitViolations;
+        static double _estopDriftDeg, _estopSince = -1;
+        static double[] _estopPose;
         static uint _firstCycle = uint.MaxValue, _lastCycle;
         static double _nextSample;
         static int _shots;
@@ -79,6 +83,9 @@ namespace ConveyorTwin.EditorTools
                 {
                     if (type == LogType.Warning && (msg.StartsWith("[Robot]") || msg.StartsWith("[Twin]")))
                         Logs.Add($"{EditorApplication.timeSinceStartup - _startedAt,6:F1}s  {msg}");
+                    // 관절각 Bad 중 흡착된 박스를 숨기고 다시 보이는 순간 (사용자 보고 버그 확인용)
+                    if (msg.Contains("박스를 숨김") && Captured.Add("hidden")) CaptureHmi("joint_bad_hidden");
+                    if (msg.Contains("숨겼던 박스를 그리퍼에 표시") && Captured.Add("shown")) CaptureHmi("joint_bad_shown");
                 };
             }
 
@@ -148,6 +155,31 @@ namespace ConveyorTwin.EditorTools
             }
             _maxJams = Math.Max(_maxJams, conveyor.JammedCount);
 
+            // 관절이 가동 범위(±1°) 안인가 — 서버는 범위 밖 값을 보내지 않으므로 벗어나면 트윈이 지어낸 것
+            for (int j = 0; j < 6; j++)
+            {
+                double q = robot.JointsDeg[j];
+                if (q < RobotKinematics.MinDeg[j] - 1 || q > RobotKinematics.MaxDeg[j] + 1)
+                {
+                    if (_limitViolations++ == 0)
+                        Logs.Add($"{EditorApplication.timeSinceStartup - _startedAt,6:F1}s  관절 가동 범위 밖: J{j + 1} = {q:F1}°");
+                    break;
+                }
+            }
+            // 비상정지 중에는 로봇이 멈춰 있어야 한다 (신호 반영 후 0.3초부터 비교)
+            if (robot.EmergencyStop && robot.LinkState == ConveyorTwin.Twin.OpcUa.RobotLinkState.Connected)
+            {
+                double now = EditorApplication.timeSinceStartup;
+                if (_estopSince < 0) { _estopSince = now; _estopPose = null; }
+                else if (now - _estopSince > 0.3)
+                {
+                    if (_estopPose == null) _estopPose = (double[])robot.JointsDeg.Clone();
+                    for (int j = 0; j < 6; j++)
+                        _estopDriftDeg = Math.Max(_estopDriftDeg, Math.Abs(robot.JointsDeg[j] - _estopPose[j]));
+                }
+            }
+            else _estopSince = -1;
+
             // 집기: 박스 윗면 중심과 TCP의 거리
             if (robot.Holding && !_wasHolding)
             {
@@ -199,6 +231,7 @@ namespace ConveyorTwin.EditorTools
                           $"검증 통과 {robot.Gate.Accepted} / 거부 {robot.Gate.RejectedBad + robot.Gate.RejectedOld + robot.Gate.RejectedFuture + robot.Gate.RejectedRange}");
             sb.AppendLine($"  컨베이어 MQTT: {(conveyor.BrokerConnected ? "연결" : "끊김")}, 화면 지연 {conveyor.ScreenDelayMs}ms, " +
                           $"입구 {conveyor.Tracker.Entered} / 출구 {conveyor.Tracker.Exited}, 최대 잼 {_maxJams}");
+            sb.AppendLine($"  관절 가동 범위 밖 샘플 {_limitViolations}건, 비상정지 중 관절 변화 최대 {_estopDriftDeg:F2}° {(_estopPose == null ? "(비상정지 없음)" : "")}");
             sb.AppendLine($"  사이클 {(_firstCycle == uint.MaxValue ? "-" : $"{_firstCycle} → {_lastCycle}")}, 집기 {_grips}, 놓기 {_releases}, 팔레트 위 {robot.BoxesOnPallet}");
             if (GripErrors.Count > 0)
                 sb.AppendLine($"  집기 오차 (박스 윗면 ↔ TCP): 평균 {GripErrors.Average() * 1000:F1}mm, 최대 {GripErrors.Max() * 1000:F1}mm");
@@ -209,7 +242,7 @@ namespace ConveyorTwin.EditorTools
             sb.AppendLine($"  캡처: dist/playcheck/ ({_shots}장)");
 
             bool ok = robot.LinkState == ConveyorTwin.Twin.OpcUa.RobotLinkState.Connected && _grips > 0 && _releases > 0 &&
-                      _maxJams == 0 && (GripErrors.Count == 0 || GripErrors.Max() < 0.02) &&
+                      _maxJams == 0 && _limitViolations == 0 && _estopDriftDeg < 0.5 && (GripErrors.Count == 0 || GripErrors.Max() < 0.02) &&
                       (placeErrors.Count == 0 || placeErrors.Max() < 0.02);
             sb.AppendLine(ok ? "  결과: 통과" : "  결과: 실패");
             if (ok) Debug.Log(sb.ToString()); else Debug.LogError(sb.ToString());

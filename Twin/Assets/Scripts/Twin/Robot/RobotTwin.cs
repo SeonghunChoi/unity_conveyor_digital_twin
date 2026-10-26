@@ -80,6 +80,12 @@ namespace ConveyorTwin.Twin.Robot
         uint _cycleBeforeOutage;
         bool _everConnected;
         bool _haveState;
+        /// <summary>관절각 Bad로 자세를 모르는 재생 타임라인 구간 [from, until). 없으면 from &lt; 0</summary>
+        double _poseUnknownFromMs = -1, _poseUnknownUntilMs = -1;
+        /// <summary>그리퍼에 붙었지만 그리퍼 위치를 몰라 숨겨 둔 박스</summary>
+        bool _heldHidden;
+
+        bool PoseUnknownAt(double t) => _poseUnknownFromMs >= 0 && t >= _poseUnknownFromMs && t < _poseUnknownUntilMs;
         readonly List<Material> _bodyMaterials = new List<Material>();
         static readonly int IdHighlightColor = Shader.PropertyToID("_HighlightColor");
         static readonly int IdHighlightStrength = Shader.PropertyToID("_HighlightStrength");
@@ -166,6 +172,8 @@ namespace ConveyorTwin.Twin.Robot
             if (_held != null) Destroy(_held);
             if (_handoff != null) Destroy(_handoff.View);
             _held = null;
+            _heldHidden = false;
+            _poseUnknownFromMs = _poseUnknownUntilMs = -1;
             _handoff = null;
             _jointSamples.Clear();
             _pendingSignals.Clear();
@@ -214,6 +222,12 @@ namespace ConveyorTwin.Twin.Robot
                             // 관절각 거부는 정상 값이 다시 올 때까지 "측정을 믿을 수 없음" 상태로 둔다.
                             // OPC UA는 상태가 바뀔 때만 알리므로 Bad는 한 번만 온다 — 시간으로 풀면 장애 도중에 알람이 꺼진다
                             bool first = s.Node != RobotNodes.JointPositions || !JointDataBad;
+                            if (s.Node == RobotNodes.JointPositions && !JointDataBad)
+                            {
+                                // 재생 타임라인 위의 "자세를 모르는 구간" 시작 (흡착·해제는 재생 시각에 처리되므로 수신 시각이 아니라 SourceTimestamp로)
+                                _poseUnknownFromMs = ToMs(s.SourceUtc);
+                                _poseUnknownUntilMs = double.MaxValue;
+                            }
                             if (s.Node == RobotNodes.JointPositions) JointDataBad = true;
                             if (first) AddWarning($"로봇 값 거부 {Short(s.Node)}: {reason}");
                         }
@@ -222,6 +236,13 @@ namespace ConveyorTwin.Twin.Robot
                     double t = ToMs(s.SourceUtc);
                     if (s.Node == RobotNodes.JointPositions)
                     {
+                        if (JointDataBad)
+                        {
+                            // 측정 복구: 모르는 구간을 보간으로 메우지 않는다. 직전까지 마지막 정상 자세를 유지하고 복구 시각에 바로 현재 자세로
+                            _poseUnknownUntilMs = t;
+                            if (_jointSamples.Count > 0)
+                                AddJointSample(t - 1, (double[])_jointSamples[_jointSamples.Count - 1].Value.Clone());
+                        }
                         JointDataBad = false;
                         AddJointSample(t, (double[])s.Value);
                         LastJointLatencyMs = s.ReceivedMs - (long)t;
@@ -246,6 +267,7 @@ namespace ConveyorTwin.Twin.Robot
             }
 
             ApplyJoints(playback);
+            ShowHiddenHeldIfPoseKnown(playback);
             ExpireHandoff(playback);
 
             // 흡착 실패 추론: 진공 출력 ON인데 압력 스위치가 안 잡힌 채 시간이 지남
@@ -282,7 +304,14 @@ namespace ConveyorTwin.Twin.Robot
             double[] q;
             if (t <= a.Key || _jointSamples.Count == 1)
             {
-                q = a.Value;   // 첫 샘플 이전이거나 마지막 샘플 이후: 그 자세 유지 (값이 바뀔 때만 오므로 현실과 같다)
+                q = a.Value;   // 첫 샘플 이전: 그 자세 유지
+            }
+            else if (t >= _jointSamples[1].Key)
+            {
+                // 마지막 샘플 이후: 그 자세 유지 (값이 바뀔 때만 오므로 현실과 같다).
+                // 이 분기가 없어 보간 비율이 1을 넘으면 직선 외삽이 되어, 움직이던 중에 멈춘 로봇(비상정지)이
+                // 마지막 속도로 끝없이 움직이고 관절이 가동 범위 밖(446° 등)까지 갔다 (사용자 보고, 2단계 6일 차부터 있던 버그)
+                q = _jointSamples[1].Value;
             }
             else
             {
@@ -315,14 +344,16 @@ namespace ConveyorTwin.Twin.Robot
             {
                 case RobotNodes.VacuumOk:
                     bool ok = (bool)s.Value;
-                    if (ok && !VacuumOk) Grip(ChangedDuringOutage(s));
+                    double at = ToMs(s.SourceUtc);
+                    ShowHiddenHeldIfPoseKnown(at);   // 이 시각에 자세가 확인됐으면 숨겨 둔 박스부터 그리퍼에 보인다
+                    if (ok && !VacuumOk) Grip(ChangedDuringOutage(s), PoseUnknownAt(at));
                     else if (!ok && VacuumOk)
                     {
                         // 놓인 순간의 그리퍼 위치를 믿을 수 없으면 위치를 지어내지 않고 지운다:
                         //  - 끊긴 동안 놓음 (값의 SourceTimestamp가 재접속 이전) — 지금 그리퍼 위치에 두면 거짓 화면
-                        //  - 관절각 Bad 동안 놓음 — 트윈 자세가 마지막 정상 자세에 멈춰 있다
+                        //  - 관절각 Bad 구간에 놓음 — 트윈 자세가 마지막 정상 자세에 멈춰 있다
                         if (ChangedDuringOutage(s)) DropUnknown("통신 끊김 중 놓인 박스");
-                        else if (JointDataBad) DropUnknown("관절각 Bad 중 놓인 박스");
+                        else if (PoseUnknownAt(at)) DropUnknown("관절각 Bad 중 놓인 박스");
                         else Release();
                     }
                     if (ok) VacuumFault = false;
@@ -383,7 +414,8 @@ namespace ConveyorTwin.Twin.Robot
         }
 
         /// <param name="duringOutage">끊긴 동안 켜진 흡착 — 어느 박스를 집었는지 트윈이 보지 못했다</param>
-        void Grip(bool duringOutage = false)
+        /// <param name="poseUnknown">관절각 Bad 구간의 흡착 — 박스를 집은 것은 알지만 그리퍼가 어디 있는지 모른다</param>
+        void Grip(bool duringOutage, bool poseUnknown)
         {
             if (_held != null)
             {
@@ -420,11 +452,38 @@ namespace ConveyorTwin.Twin.Robot
             var t = view.transform;
             var top = t.position + t.up * t.lossyScale.y * 0.5f;
             LastGripOffsetM = (top - _tcp.position).magnitude;
-            LastGripDuringBadData = JointDataBad || duringOutage;
-            t.position = _tcp.position - t.up * t.lossyScale.y * 0.5f;
-            t.SetParent(_tcp, true);
+            LastGripDuringBadData = poseUnknown || duringOutage;
+            AttachToTcp(t);
             _held = view;
             GripCount++;
+
+            // 관절각 Bad 구간: 트윈의 그리퍼는 마지막 정상 자세에 멈춰 있으므로 거기 붙여 보이면 박스가 엉뚱한 곳으로 순간이동한다.
+            // 벨트에서는 빼되(현실에서 집혔으므로) 숨겨 두고, 자세가 다시 확인되면 그때 그리퍼에 보인다 (사용자 시험에서 발견)
+            if (poseUnknown)
+            {
+                view.SetActive(false);
+                _heldHidden = true;
+                AddWarning("관절각 Bad 중 흡착: 그리퍼 위치를 몰라 박스를 숨김 (자세가 확인되면 표시)");
+            }
+        }
+
+        /// <summary>압력 스위치 ON = 박스 윗면이 흡착 패드(TCP)에 붙어 있다 → 박스를 TCP에 맞춰 붙인다</summary>
+        void AttachToTcp(Transform box)
+        {
+            box.position = _tcp.position - box.up * box.lossyScale.y * 0.5f;
+            box.SetParent(_tcp, true);
+        }
+
+        /// <summary>숨겨 둔 박스: 자세를 모르는 구간이 끝난 재생 시각부터 그리퍼(그 시각의 실제 자세)에 보인다</summary>
+        void ShowHiddenHeldIfPoseKnown(double t)
+        {
+            if (!_heldHidden || _held == null || PoseUnknownAt(t) || t < _poseUnknownUntilMs) return;
+            ApplyJoints(t);
+            _held.transform.SetParent(null, true);
+            AttachToTcp(_held.transform);
+            _held.SetActive(true);
+            _heldHidden = false;
+            AddWarning("관절각 복구: 숨겼던 박스를 그리퍼에 표시");
         }
 
         /// <summary>재접속 뒤 받은 값 중 끊긴 동안 바뀐 것 (SourceTimestamp가 재접속 이전)</summary>
@@ -437,6 +496,7 @@ namespace ConveyorTwin.Twin.Robot
             AddWarning(why + ": 놓인 위치를 알 수 없어 표시하지 않음");
             Destroy(_held);
             _held = null;
+            _heldHidden = false;
         }
 
         void Release()
