@@ -200,6 +200,44 @@ namespace ConveyorTwin.EditorTools
             }
             _wasHolding = robot.Holding;
             _lastPalletCount = robot.BoxesOnPallet;
+
+            // 뜬 박스: 장애로 보지 못한 칸 위에 다음 단 박스가 떠 보이던 문제 (사용자 보고). 1초마다 세어 최댓값을 남긴다
+            if (Time.realtimeSinceStartup >= _nextFloatCheck)
+            {
+                _nextFloatCheck = Time.realtimeSinceStartup + 1f;
+                int floating = CountFloating(robot);
+                if (floating > _maxFloating)
+                {
+                    if (_maxFloating == 0) Capture("floating");
+                    _maxFloating = floating;
+                    Logs.Add($"{EditorApplication.timeSinceStartup - _startedAt,6:F1}s  뜬 박스 {floating}개 (팔레트 위 {robot.BoxesOnPallet}, 추정 {robot.BoxesEstimated})");
+                }
+            }
+        }
+
+        static float _nextFloatCheck;
+        static int _maxFloating;
+
+        /// <summary>
+        /// 팔레트 바닥보다 높은데 바로 아래(윗면이 이 박스 바닥과 2cm 이내, 수평 10cm 이내)에 받치는 박스가 없는 박스 수.
+        /// 추정 박스도 받침으로 친다 — 추정은 "위층이 있으면 아래도 있다"를 화면에 보이는 것이므로.
+        /// </summary>
+        static int CountFloating(RobotTwin robot)
+        {
+            float half = (float)RobotCell.BoxHeightM / 2;
+            var first = RobotCell.SlotTop(0);
+            float palletTop = RobotCellBuilder.CellToWorld(new CellPoint(first.X, first.Y, first.Z - RobotCell.BoxHeightM)).y;
+            var boxes = robot.Stack.Cast<Transform>().Select(t => t.position).ToList();
+            int count = 0;
+            foreach (var p in boxes)
+            {
+                float bottom = p.y - half;
+                if (bottom < palletTop + 0.02f) continue;
+                bool supported = boxes.Any(q => Mathf.Abs(q.y + half - bottom) < 0.02f &&
+                                                new Vector2(q.x - p.x, q.z - p.z).magnitude < 0.1f);
+                if (!supported) count++;
+            }
+            return count;
         }
 
         static void Finish(RobotTwin robot, ConveyorTwinController conveyor)
@@ -221,9 +259,12 @@ namespace ConveyorTwin.EditorTools
                 var top = RobotCell.SlotTop(i);
                 return RobotCellBuilder.CellToWorld(new CellPoint(top.X, top.Y, top.Z - RobotCell.BoxHeightM / 2));
             }).ToList();
+            // 추정 박스는 칸 중심에 놓으므로 오차 0 — 관측(트윈이 놓이는 순간을 본) 박스만 잰다
             var placeErrors = new List<double>();
             foreach (Transform box in robot.Stack)
-                placeErrors.Add(slotCenters.Min(c => (c - box.position).magnitude));
+                if (!box.name.StartsWith("Estimated_"))
+                    placeErrors.Add(slotCenters.Min(c => (c - box.position).magnitude));
+            _maxFloating = Math.Max(_maxFloating, CountFloating(robot));
 
             int seconds = SessionState.GetInt("TwinPlayCheck.Seconds", 0);
             var sb = new StringBuilder($"[Play] 트윈 플레이 점검 {seconds}s\n");
@@ -232,7 +273,7 @@ namespace ConveyorTwin.EditorTools
             sb.AppendLine($"  컨베이어 MQTT: {(conveyor.BrokerConnected ? "연결" : "끊김")}, 화면 지연 {conveyor.ScreenDelayMs}ms, " +
                           $"입구 {conveyor.Tracker.Entered} / 출구 {conveyor.Tracker.Exited}, 최대 잼 {_maxJams}");
             sb.AppendLine($"  관절 가동 범위 밖 샘플 {_limitViolations}건, 비상정지 중 관절 변화 최대 {_estopDriftDeg:F2}° {(_estopPose == null ? "(비상정지 없음)" : "")}");
-            sb.AppendLine($"  사이클 {(_firstCycle == uint.MaxValue ? "-" : $"{_firstCycle} → {_lastCycle}")}, 집기 {_grips}, 놓기 {_releases}, 팔레트 위 {robot.BoxesOnPallet}");
+            sb.AppendLine($"  사이클 {(_firstCycle == uint.MaxValue ? "-" : $"{_firstCycle} → {_lastCycle}")}, 집기 {_grips}, 놓기 {_releases}, 팔레트 위 {robot.BoxesOnPallet} (관측 {robot.BoxesObserved}, 추정 {robot.BoxesEstimated}), 뜬 박스 최대 {_maxFloating}개");
             if (GripErrors.Count > 0)
                 sb.AppendLine($"  집기 오차 (박스 윗면 ↔ TCP): 평균 {GripErrors.Average() * 1000:F1}mm, 최대 {GripErrors.Max() * 1000:F1}mm");
             if (placeErrors.Count > 0)
@@ -242,7 +283,7 @@ namespace ConveyorTwin.EditorTools
             sb.AppendLine($"  캡처: dist/playcheck/ ({_shots}장)");
 
             bool ok = robot.LinkState == ConveyorTwin.Twin.OpcUa.RobotLinkState.Connected && _grips > 0 && _releases > 0 &&
-                      _maxJams == 0 && _limitViolations == 0 && _estopDriftDeg < 0.5 && (GripErrors.Count == 0 || GripErrors.Max() < 0.02) &&
+                      _maxJams == 0 && _limitViolations == 0 && _estopDriftDeg < 0.5 && _maxFloating == 0 && (GripErrors.Count == 0 || GripErrors.Max() < 0.02) &&
                       (placeErrors.Count == 0 || placeErrors.Max() < 0.02);
             sb.AppendLine(ok ? "  결과: 통과" : "  결과: 실패");
             if (ok) Debug.Log(sb.ToString()); else Debug.LogError(sb.ToString());

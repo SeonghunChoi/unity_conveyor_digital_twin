@@ -143,7 +143,7 @@ namespace ConveyorTwin.Twin
             {
                 var g = robot.Gate;
                 Line($"로봇 OPC UA: {robot.LinkState} {robot.LinkError}, 검증 통과 {g.Accepted} / Bad {g.RejectedBad} / 과거 {g.RejectedOld} / 범위 밖 {g.RejectedRange}");
-                Line($"사이클 {robot.CycleCount}, 집기 {robot.GripCount}, 팔레트 표시 {robot.BoxesOnPallet}");
+                Line($"사이클 {robot.CycleCount}, 집기 {robot.GripCount}, 팔레트 표시 {robot.BoxesOnPallet} (관측 {robot.BoxesObserved}, 추정 {robot.BoxesEstimated})");
             }
             if (_gripOffsets.Count > 0)
                 Line($"집기 오차 (맞추기 전): 평균 {_gripOffsets.Average() * 1000:F1}mm, 최대 {_gripOffsets.Max() * 1000:F1}mm ({_gripOffsets.Count}회)");

@@ -108,7 +108,7 @@
                     <ui:Label name="robot-state" text="-" class="robot-state" />
                     <ui:VisualElement class="stat-grid">
                         <ui:VisualElement class="stat stat-third"><ui:Label text="사이클" class="stat-label" /><ui:Label name="robot-cycles" text="-" class="stat-value small" /></ui:VisualElement>
-                        <ui:VisualElement class="stat stat-third"><ui:Label text="팔레트 (표시/48)" class="stat-label" /><ui:Label name="robot-pallet" text="-" class="stat-value small" /></ui:VisualElement>
+                        <ui:VisualElement class="stat stat-third"><ui:Label text="팔레트 (관측+추정/48)" class="stat-label" /><ui:Label name="robot-pallet" text="-" class="stat-value small" /></ui:VisualElement>
                         <ui:VisualElement class="stat stat-third"><ui:Label text="출구 대기" class="stat-label" /><ui:Label name="robot-exitwait" text="-" class="stat-value small" /></ui:VisualElement>
                     </ui:VisualElement>
                     <ui:VisualElement class="io-row">

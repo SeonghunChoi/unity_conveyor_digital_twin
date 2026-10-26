@@ -85,6 +85,15 @@ namespace ConveyorTwin.Twin.Robot
         /// <summary>그리퍼에 붙었지만 그리퍼 위치를 몰라 숨겨 둔 박스</summary>
         bool _heldHidden;
 
+        // ---- 팔레트 칸 (사용자 제안으로 추가: 보지 못한 박스 때문에 생긴 빈칸 위에 박스가 떠 보이던 문제) ----
+        /// <summary>칸 번호 → 그 칸의 박스 (관측 또는 추정)</summary>
+        readonly Dictionary<int, GameObject> _slots = new Dictionary<int, GameObject>();
+        readonly HashSet<int> _estimated = new HashSet<int>();
+        /// <summary>현재 팔레트를 시작한 사이클 수. 칸 번호 = 놓을 때의 사이클 수 − 이 값. 교체를 보면 확정, 아니면 레시피(48개마다 교체)로 가정</summary>
+        uint? _palletBaseCycle;
+        bool _palletKnown, _cycleKnown;   // 첫 값을 받았는지 (기본값으로 칸을 채우지 않게)
+        Material _estimatedMaterial;
+
         bool PoseUnknownAt(double t) => _poseUnknownFromMs >= 0 && t >= _poseUnknownFromMs && t < _poseUnknownUntilMs;
         readonly List<Material> _bodyMaterials = new List<Material>();
         static readonly int IdHighlightColor = Shader.PropertyToID("_HighlightColor");
@@ -109,6 +118,10 @@ namespace ConveyorTwin.Twin.Robot
         public bool VacuumOk { get; private set; }
         public bool PalletPresent { get; private set; } = true;
         public int BoxesOnPallet => _stack != null ? _stack.childCount : 0;
+        /// <summary>팔레트 위 박스 중 트윈이 놓이는 순간을 본 것</summary>
+        public int BoxesObserved => _slots.Count - _estimated.Count;
+        /// <summary>팔레트 위 박스 중 보지 못해 사이클 수·적재 레시피로 추정한 것 (회색으로 구분)</summary>
+        public int BoxesEstimated => _estimated.Count;
         public bool Holding => _held != null;
         public GameObject HeldBox => _held;
         public Transform Stack => _stack;
@@ -174,6 +187,10 @@ namespace ConveyorTwin.Twin.Robot
             _held = null;
             _heldHidden = false;
             _poseUnknownFromMs = _poseUnknownUntilMs = -1;
+            _slots.Clear();
+            _estimated.Clear();
+            _palletBaseCycle = null;
+            _palletKnown = _cycleKnown = false;
             _handoff = null;
             _jointSamples.Clear();
             _pendingSignals.Clear();
@@ -366,8 +383,11 @@ namespace ConveyorTwin.Twin.Robot
                     break;
                 case RobotNodes.PalletPresent:
                     bool present = (bool)s.Value;
-                    if (present != PalletPresent) OnPalletChanged(present);
+                    // 첫 값(접속 시 초기값)의 ON은 "교체를 봤다"가 아니다 — 팔레트가 얼마나 찼는지는 레시피로 가정
+                    if (present != PalletPresent) OnPalletChanged(present, _palletKnown && !ChangedDuringOutage(s));
                     PalletPresent = present;
+                    _palletKnown = true;
+                    FillEstimatedSlots();
                     break;
                 case RobotNodes.MotorsOn:
                     MotorsOn = (bool)s.Value;
@@ -381,11 +401,13 @@ namespace ConveyorTwin.Twin.Robot
                     uint cycles = (uint)s.Value;
                     if (ChangedDuringOutage(s) && cycles > _cycleBeforeOutage)
                     {
-                        // 끊긴 동안 완료한 사이클의 박스는 놓인 순간을 못 봤으므로 그리지 않는다 (위치를 지어내지 않음)
-                        AddWarning($"끊긴 동안 적재 {cycles - _cycleBeforeOutage}개: 놓인 위치를 볼 수 없어 팔레트에 표시하지 않음");
+                        // 끊긴 동안 완료한 사이클의 박스는 놓인 순간을 못 봤다 — 관측처럼 그리지 않고, 레시피 칸에 추정 박스로 구분해 표시
+                        AddWarning($"끊긴 동안 적재 {cycles - _cycleBeforeOutage}개: 놓인 순간을 못 봐 적재 레시피 칸에 추정 박스(회색)로 표시");
                         _cycleBeforeOutage = cycles;
                     }
                     CycleCount = cycles;
+                    _cycleKnown = true;
+                    FillEstimatedSlots();
                     break;
                 case RobotNodes.SpeedOverride: SpeedOverride = (double)s.Value; break;
             }
@@ -489,11 +511,11 @@ namespace ConveyorTwin.Twin.Robot
         /// <summary>재접속 뒤 받은 값 중 끊긴 동안 바뀐 것 (SourceTimestamp가 재접속 이전)</summary>
         bool ChangedDuringOutage(in RobotSample s) => _reconnectedMs > 0 && ToMs(s.SourceUtc) < _reconnectedMs;
 
-        /// <summary>놓인 위치를 알 수 없는 박스: 지어내지 않고 지운다</summary>
+        /// <summary>놓인 위치를 알 수 없는 박스: 그리퍼 위치에 두지 않고 지운다. 그 칸은 사이클 수가 오르면 추정 박스로 채운다</summary>
         void DropUnknown(string why)
         {
             if (_held == null) return;
-            AddWarning(why + ": 놓인 위치를 알 수 없어 표시하지 않음");
+            AddWarning(why + ": 그리퍼 위치를 믿을 수 없어 관측 박스로 두지 않음 (칸은 추정 박스로)");
             Destroy(_held);
             _held = null;
             _heldHidden = false;
@@ -506,20 +528,108 @@ namespace ConveyorTwin.Twin.Robot
                 AddWarning("든 박스가 없는데 흡착 해제 신호");
                 return;
             }
-            _held.transform.SetParent(_stack, true);   // 그 자리에 둔다
+            _held.transform.SetParent(_stack, true);   // 그 자리에 둔다 (칸 위치로 옮기지 않음 — 관측이 우선)
+
+            // 칸 번호만 기록한다: 사이클 수는 놓은 직후에 오르므로 지금 값이 곧 이 박스의 칸 번호 (서버 적재 프로그램과 같은 규칙)
+            int slot = (int)(CycleCount - PalletBase());
+            if (slot >= 0 && slot < RobotCell.SlotCount)
+            {
+                if (_slots.TryGetValue(slot, out var old) && _estimated.Remove(slot)) Destroy(old);   // 추정 박스를 관측으로 대체
+                _slots[slot] = _held;
+            }
             _held = null;
         }
 
-        void OnPalletChanged(bool present)
+        void OnPalletChanged(bool present, bool observedSwap)
         {
             if (!present)
             {
                 // 가득 찬 팔레트를 뺐다: 위에 쌓인 박스와 함께 사라진다
                 foreach (Transform box in _stack) Destroy(box.gameObject);
-                AddWarning($"팔레트 교체: 박스 {_stack.childCount}개와 함께 반출");
+                AddWarning($"팔레트 교체: 박스 {_stack.childCount}개(관측 {BoxesObserved}, 추정 {BoxesEstimated})와 함께 반출");
+                _slots.Clear();
+                _estimated.Clear();
+            }
+            else
+            {
+                // 빈 팔레트가 들어오는 것을 봤으면 여기서부터 칸 0 (확정), 아니면 레시피 가정으로
+                _palletBaseCycle = observedSwap ? CycleCount : (uint?)null;
             }
             foreach (var r in pallet.GetComponentsInChildren<Renderer>(true))
                 if (!r.transform.IsChildOf(_stack)) r.enabled = present;
+        }
+
+        // ---------- 추정 박스 ----------
+
+        /// <summary>
+        /// 현재 팔레트를 시작한 사이클 수. 팔레트 교체(DI_PalletPresent OFF→ON)를 봤으면 그 값,
+        /// 못 봤으면(트윈이 팔레트 도중에 시작) 적재 레시피 "48개마다 교체, 빈 팔레트로 시작"으로 가정한다.
+        /// </summary>
+        uint PalletBase()
+        {
+            if (_palletBaseCycle == null)
+                _palletBaseCycle = CycleCount - CycleCount % (uint)RobotCell.SlotCount;
+            return _palletBaseCycle.Value;
+        }
+
+        /// <summary>
+        /// 사이클 수가 말해 주는 "이미 채워진 칸" 중 트윈에 박스가 없는 칸을 추정 박스로 채운다.
+        /// 트윈이 놓이는 순간을 못 본 박스(통신 끊김·관절각 Bad·트윈 시작 전) 때문에 빈칸이 생기고 그 위에 다음 단 박스가 떠 보이던 문제.
+        /// 관측 박스는 옮기지 않는다 (사용자 제안의 "빈칸으로 옮겨 놓기"는 관측값을 고치는 것이라 쓰지 않음).
+        /// 근거: 사이클 수(현실의 원시 신호) + 적재 레시피(RobotCell, 로봇 프로그램의 패턴) + "위층이 있으면 아래도 있다"는 물리.
+        /// 추정은 회색으로 그려 관측과 구분한다.
+        /// </summary>
+        void FillEstimatedSlots()
+        {
+            if (!PalletPresent || !_palletKnown || !_cycleKnown) return;
+            uint palletBase = PalletBase();
+            if (CycleCount < palletBase || CycleCount - palletBase > RobotCell.SlotCount)
+            {
+                // 48개를 넘었다 = 보지 못한 사이 팔레트가 교체됐다 (통신 끊김 중 등). 쌓인 박스는 반출된 것
+                AddWarning("보지 못한 사이 팔레트 교체: 표시하던 박스를 지우고 레시피 기준으로 다시 표시");
+                foreach (Transform box in _stack) Destroy(box.gameObject);
+                _slots.Clear();
+                _estimated.Clear();
+                _palletBaseCycle = null;
+            }
+            int filled = (int)Math.Min(CycleCount - PalletBase(), (uint)RobotCell.SlotCount);
+            int added = 0;
+            for (int slot = 0; slot < filled; slot++)
+            {
+                if (_slots.ContainsKey(slot)) continue;
+                _slots[slot] = CreateEstimatedBox(slot);
+                _estimated.Add(slot);
+                added++;
+            }
+            if (added > 0)
+                AddWarning($"추정 박스 {added}개 표시 (놓이는 순간을 못 본 칸, 사이클 {CycleCount}·적재 레시피 기준)");
+        }
+
+        GameObject CreateEstimatedBox(int slot)
+        {
+            if (_estimatedMaterial == null)
+            {
+                // 추정 = 회색 (1단계부터 "믿을 수 없는 값은 회색"과 같은 표현). 투명 셰이더 변형은 빌드에서 빠질 수 있어 불투명 회색조로
+                var shader = statusShader != null ? statusShader : Shader.Find("Universal Render Pipeline/Lit");
+                _estimatedMaterial = new Material(shader) { name = "EstimatedBox" };
+                _estimatedMaterial.SetColor(IdBaseColor, conveyor.BoxMaterial.GetColor(IdBaseColor));
+                if (statusShader != null) _estimatedMaterial.SetFloat(IdDesaturate, 0.85f);
+                else _estimatedMaterial.SetColor(IdBaseColor, new Color(0.55f, 0.55f, 0.55f));
+            }
+            var box = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            box.name = $"Estimated_Slot{slot:D2}";
+            Destroy(box.GetComponent<Collider>());
+            box.GetComponent<Renderer>().sharedMaterial = _estimatedMaterial;
+
+            // 칸 윗면 중심(로봇 베이스 좌표) → 로봇 로컬 (−x, z, −y) → 월드. 박스 긴 변 = 베이스 +X = 로봇 로컬 −X
+            var top = RobotCell.SlotTop(slot);
+            var local = new Vector3(-(float)top.X, (float)(top.Z - RobotCell.BoxHeightM / 2), -(float)top.Y);
+            box.transform.SetPositionAndRotation(robotRoot.TransformPoint(local),
+                robotRoot.rotation * Quaternion.LookRotation(Vector3.left, Vector3.up));
+            // 3% 작게: 이웃 박스와 붙어 보이지 않게 해 "따로 추정한 것"으로 읽히도록
+            box.transform.localScale = new Vector3((float)RobotCell.BoxWidthM, (float)RobotCell.BoxHeightM, (float)RobotCell.BoxLengthM) * 0.97f;
+            box.transform.SetParent(_stack, true);
+            return box;
         }
 
         // ---------- 알람·표시 ----------
@@ -598,6 +708,7 @@ namespace ConveyorTwin.Twin.Robot
             if (conveyor != null && conveyor.Tracker != null) conveyor.Tracker.ExitHandoff = null;
             if (conveyor != null) conveyor.AppendConditions = null;
             foreach (var m in _bodyMaterials) Destroy(m);
+            if (_estimatedMaterial != null) Destroy(_estimatedMaterial);
         }
     }
 }

@@ -475,7 +475,10 @@ namespace ConveyorTwin.Twin.Hmi
             _robotCard.EnableInClassList("stale", !connected || robot.JointDataBad);
 
             _robotCycles.text = robot.CycleCount.ToString();
-            _robotPallet.text = robot.PalletPresent ? $"{robot.BoxesOnPallet} / {RobotCell.SlotCount}" : "교체 중";
+            // 추정 박스(놓이는 순간을 못 본 칸)는 관측과 나눠 보인다: "7+3 / 48"
+            _robotPallet.text = !robot.PalletPresent ? "교체 중"
+                : robot.BoxesEstimated > 0 ? $"{robot.BoxesObserved}+{robot.BoxesEstimated} / {RobotCell.SlotCount}"
+                : $"{robot.BoxesObserved} / {RobotCell.SlotCount}";
             double wait = robot.ExitWaitS;
             _robotExitWait.text = wait > 0 ? $"{wait:F1}s" : "-";
 
