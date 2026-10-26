@@ -43,6 +43,8 @@ using (var dc = await DiscoveryClient.CreateAsync(config, new Uri(OpcUaEndpoint.
 Console.WriteLine($"[Probe] 엔드포인트 {endpoints.Count}개: " +
     string.Join(", ", endpoints.Select(e => $"{e.SecurityMode}/{e.SecurityPolicyUri.Split('#').Last()}")));
 var ep = endpoints.First(e => e.SecurityPolicyUri == policy && e.SecurityMode == mode);
+// 서버는 내부 포트(4841)를 광고하지만 트윈처럼 설정한 주소(4840, 네트워크 중계)로 접속한다
+ep.EndpointUrl = new UriBuilder(ep.EndpointUrl) { Host = new Uri(OpcUaEndpoint.Url).Host, Port = new Uri(OpcUaEndpoint.Url).Port }.ToString();
 
 var sw = Stopwatch.StartNew();
 ISession session;

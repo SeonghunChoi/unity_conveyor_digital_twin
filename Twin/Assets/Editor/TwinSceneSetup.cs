@@ -71,6 +71,7 @@ namespace ConveyorTwin.EditorTools
                 rso.FindProperty("conveyor").objectReferenceValue = controller;
                 rso.FindProperty("robotRoot").objectReferenceValue = cell.transform.Find("Robot");
                 rso.FindProperty("pallet").objectReferenceValue = cell.transform.Find("Pallet");
+                rso.FindProperty("statusShader").objectReferenceValue = statusShader;
                 rso.ApplyModifiedPropertiesWithoutUndo();
             }
             var vso = new SerializedObject(visuals);

@@ -18,6 +18,13 @@ public sealed record RobotStatus(string Phase, uint CycleCount, int NextSlot, bo
 /// 실제 로봇의 MoveJ와 같은 방식이며, 직선 경로(MoveL)는 쓰지 않는다 — 수직 접근 구간이 짧아 휘는 정도가 작다.
 ///
 /// 트윈에는 관절각·진공 출력·압력 스위치·사이클 수 같은 원시 신호만 간다. "지금 무슨 단계인가"는 트윈이 신호 조합으로 추론한다.
+///
+/// 설비 장애 (7일 차, 서버 UI 버튼 — 원칙 3: 장애는 현실 쪽에서):
+///  - 비상정지: 그 자리에서 멈추고 모터 전원 차단, 프로그램 정지. 해제하면 1초 뒤 모터가 켜지고 멈춘 동작을 이어 간다
+///    (컨트롤러 시계가 멈춰 있으므로 보간·대기 시간이 그대로 이어진다). 진공은 유지 — 비상정지로 박스를 떨어뜨리지 않는다
+///  - 흡착 실패: 진공을 켜도 압력 스위치가 잡히지 않는다. 1초 뒤 진공을 끄고 프로그램을 멈춘 채 픽 위치에서 기다리며, 해제하면 다시 흡착을 시도한다
+///  - 엔코더 이상: 관절각 노드의 StatusCode가 Bad (값은 마지막 값). 로봇은 계속 움직인다 — 측정만 믿을 수 없는 상태
+/// 통신 끊김은 컨트롤러가 아니라 네트워크(NetworkRelay) 장애다.
 /// </summary>
 public sealed class RobotController
 {
@@ -35,8 +42,18 @@ public sealed class RobotController
     const double VacuumReleaseS = 0.10;  // 진공 끈 뒤 압력 스위치가 풀릴 때까지
     const double SettleS = 0.10;         // 놓은 뒤 빠져나오기 전 대기
     const double PalletSwapS = 4.0;      // 가득 찬 팔레트를 빼고 빈 팔레트를 넣는 시간
+    const double GripTimeoutS = 1.0;     // 진공을 켜고 압력 스위치를 기다리는 한도
+    const double MotorsOnDelayS = 1.0;   // 비상정지 해제 후 모터 전원이 들어올 때까지
 
-    enum Phase { ToReady, WaitPart, ToPick, Grip, Lift, ToApproach, ToPlace, Release, Retract, PalletSwap }
+    enum Phase { ToReady, WaitPart, ToPick, Grip, GripFailed, Lift, ToApproach, ToPlace, Release, Retract, PalletSwap }
+
+    // ---- 장애 (UI 스레드에서 켜고 끈다) ----
+    public volatile bool EmergencyStop;
+    public volatile bool VacuumFailure;
+    public volatile bool EncoderFault;
+
+    bool _motorsOn = true;
+    double _estopReleasedAtS = -1;      // 실시간 기준
 
     readonly RobotOpcUaServer _server;
     readonly ConveyorSimulator _conveyor;
@@ -63,19 +80,60 @@ public sealed class RobotController
     public async Task RunAsync(CancellationToken ct)
     {
         var clock = Stopwatch.StartNew();
+        double lastReal = 0, ctrl = 0;   // 컨트롤러 시계: 모터가 켜져 있을 때만 흐른다 (비상정지 중 동작·대기 시간 정지)
         StartMove(Pose(Ready), 0);
         using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(TickMs));
         while (await timer.WaitForNextTickAsync(ct))
         {
-            double now = clock.Elapsed.TotalSeconds;
-            Step(now);
-            _server.Publish(new RobotSnapshot((double[])_q.Clone(), true, 100.0, OperationalMode.Automatic,
-                ProgramExecutionState.Running, _cycles, false, false, _vacuumOn, _vacuumOk, _palletPresent));
+            double real = clock.Elapsed.TotalSeconds;
+            double dt = real - lastReal;
+            lastReal = real;
+
+            bool estop = EmergencyStop;
+            if (estop)
+            {
+                _motorsOn = false;
+                _estopReleasedAtS = -1;
+            }
+            else if (!_motorsOn)
+            {
+                if (_estopReleasedAtS < 0) _estopReleasedAtS = real;
+                if (real - _estopReleasedAtS >= MotorsOnDelayS) _motorsOn = true;
+            }
+
+            if (_motorsOn)
+            {
+                ctrl += dt;
+                Step(ctrl);
+            }
+            UpdateVacuum(real);
+            bool running = _motorsOn && _phase != Phase.GripFailed;
+            _server.Publish(new RobotSnapshot((double[])_q.Clone(), _motorsOn, 100.0, OperationalMode.Automatic,
+                running ? ProgramExecutionState.Running : ProgramExecutionState.Stopped, _cycles, estop, false,
+                _vacuumOn, _vacuumOk, _palletPresent, EncoderFault));
             Updated?.Invoke(new RobotStatus(_phase.ToString(), _cycles, _slot, _palletPresent, _lastCycleS, (double[])_q.Clone()));
         }
     }
 
     static CellPoint Ready => Above(RobotCell.PickTop, ReadyAboveM);
+
+    bool _lastVacuumOn;
+    double _vacuumChangedAtS;
+
+    /// <summary>
+    /// 진공(공압)은 모터 전원과 무관하게 실제 시간으로 형성·해제된다. 컨트롤러 시계로 재면 비상정지 중 압력 스위치가 늦게 켜져
+    /// 트윈이 흡착 실패로 오판했다 (7일 차 시험에서 발견). 흡착 실패 장애면 진공을 켜도 압력이 잡히지 않는다.
+    /// </summary>
+    void UpdateVacuum(double real)
+    {
+        if (_vacuumOn != _lastVacuumOn)
+        {
+            _lastVacuumOn = _vacuumOn;
+            _vacuumChangedAtS = real;
+        }
+        if (_vacuumOn && !VacuumFailure && real - _vacuumChangedAtS >= VacuumBuildS) _vacuumOk = true;
+        if (!_vacuumOn && real - _vacuumChangedAtS >= VacuumReleaseS) _vacuumOk = false;
+    }
 
     void Step(double now)
     {
@@ -106,12 +164,29 @@ public sealed class RobotController
                 break;
 
             case Phase.Grip:
-                if (inPhase >= VacuumBuildS)
+                if (VacuumFailure)
                 {
-                    _vacuumOk = true;           // 압력 스위치: 물건이 붙었다
-                    _conveyor.RequestPick();    // 들어 올리면 출구 센서가 풀린다
+                    // 압력 스위치가 잡히지 않음 → 한도 시간 뒤 진공을 끄고 프로그램 정지 (픽 위치에서 대기)
+                    if (inPhase >= GripTimeoutS)
+                    {
+                        _vacuumOn = false;
+                        Enter(Phase.GripFailed, now);
+                    }
+                }
+                else if (_vacuumOk)
+                {
+                    // 압력 스위치가 잡혔다 (UpdateVacuum) → 들어 올리면 출구 센서가 풀린다
+                    _conveyor.RequestPick();
                     StartMove(Pose(Ready), now);
                     Enter(Phase.Lift, now);
+                }
+                break;
+
+            case Phase.GripFailed:
+                if (!VacuumFailure)
+                {
+                    _vacuumOn = true;      // 운전자가 해제(재시작) → 다시 흡착 시도
+                    Enter(Phase.Grip, now);
                 }
                 break;
 
@@ -140,8 +215,7 @@ public sealed class RobotController
                 break;
 
             case Phase.Release:
-                if (inPhase >= VacuumReleaseS) _vacuumOk = false;
-                if (inPhase >= VacuumReleaseS + SettleS)
+                if (!_vacuumOk && inPhase >= VacuumReleaseS + SettleS)
                 {
                     StartMove(Pose(Above(RobotCell.SlotTop(_slot), ApproachAboveM)), now);
                     _cycles++;

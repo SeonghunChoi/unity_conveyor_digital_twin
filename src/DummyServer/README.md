@@ -55,6 +55,9 @@ dotnet run --project src/DummyServer
 | 모터 정지 | `ConveyorSimulator` | `state/run` = `fault` (`motor overload trip`), 속도·전류 0 |
 
 통신 장애는 "통신 경로"인 `DevicePublisher`가, 설비 장애는 "현실"인 `ConveyorSimulator`가 만든다.
+
+로봇 셀 장애 4종(로봇 통신 끊김, 비상정지, 흡착 실패, 관절 엔코더 이상)은 [docs/robot-faults.md](../../docs/robot-faults.md).
+같은 원칙으로 통신 끊김은 네트워크 경로인 `OpcUa/NetworkRelay`(4840→4841 중계)가, 나머지는 `Simulation/RobotController`가 만든다.
 연결이 끊겨도 시뮬레이션은 계속 진행된다 (현실은 멈추지 않는다).
 
 검증 (UI Automation으로 버튼을 누르고 구독 클라이언트로 기록): 6종 모두 위 동작대로 수신됨.

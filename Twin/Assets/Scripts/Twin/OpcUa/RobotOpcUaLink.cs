@@ -252,8 +252,10 @@ namespace ConveyorTwin.Twin.OpcUa
             var ep = endpoints.FirstOrDefault(e => e.SecurityPolicyUri == OpcUaEndpoint.SecurityPolicy &&
                                                    e.SecurityMode == MessageSecurityMode.SignAndEncrypt)
                      ?? throw new InvalidOperationException("서버에 Basic256Sha256 SignAndEncrypt 엔드포인트가 없습니다.");
-            // 서버가 알려준 URL의 호스트를 접속한 주소로 맞춘다
-            ep.EndpointUrl = new UriBuilder(ep.EndpointUrl) { Host = new Uri(OpcUaEndpoint.Url).Host }.ToString();
+            // 서버가 광고한 URL(내부 포트 4841)이 아니라 설정한 주소로 접속한다 — 호스트와 포트 모두 (스택의 CoreClientUtils와 같은 방식).
+            // 서버 앞의 네트워크 중계(4840)를 거쳐야 "로봇 통신 끊김" 장애가 트윈에도 보인다
+            var configured = new Uri(OpcUaEndpoint.Url);
+            ep.EndpointUrl = new UriBuilder(ep.EndpointUrl) { Host = configured.Host, Port = configured.Port }.ToString();
 
             _sessionLost = false;
             var session = await new DefaultSessionFactory(_telemetry).CreateAsync(

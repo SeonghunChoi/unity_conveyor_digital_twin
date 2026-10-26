@@ -24,7 +24,7 @@
 
 | 항목 | 값 |
 | --- | --- |
-| 엔드포인트 | `opc.tcp://127.0.0.1:4840` (더미 서버 프로세스에 내장) |
+| 엔드포인트 | `opc.tcp://127.0.0.1:4840` (더미 서버 프로세스에 내장). 서버는 내부 포트 4841에서 듣고 4840은 네트워크 중계(`NetworkRelay`)가 넘긴다 — "로봇 통신 끊김" 장애용. 클라이언트는 광고된 4841이 아니라 설정한 4840으로 접속한다 |
 | 보안 정책 | None (점검 도구용), SignAndEncrypt: Basic256Sha256 / Aes128_Sha256_RsaOaep / Aes256_Sha256_RsaPss |
 | 트윈이 쓰는 정책 | **SignAndEncrypt + Basic256Sha256** (Mono는 RsaPss 불가, [opcua-spike.md](opcua-spike.md)) |
 | 사용자 인증 | 익명 |

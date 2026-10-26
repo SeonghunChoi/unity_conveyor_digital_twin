@@ -78,7 +78,7 @@ namespace ConveyorTwin.EditorTools
                 Application.logMessageReceived += (msg, stack, type) =>
                 {
                     if (type == LogType.Warning && (msg.StartsWith("[Robot]") || msg.StartsWith("[Twin]")))
-                        Logs.Add($"{DateTime.Now:HH:mm:ss} {msg}");
+                        Logs.Add($"{EditorApplication.timeSinceStartup - _startedAt,6:F1}s  {msg}");
                 };
             }
 
@@ -97,8 +97,40 @@ namespace ConveyorTwin.EditorTools
                 Finish(robot, conveyor);
         }
 
+        static readonly HashSet<string> ActiveAlarms = new HashSet<string>();
+        static readonly HashSet<string> Captured = new HashSet<string>();
+        static double _startedAt = -1;
+        static bool _announced;
+
+        /// <summary>알람 키가 켜지고 꺼지는 순간을 기록 (장애 시나리오 검증용). 로봇 알람이 처음 뜨면 화면도 캡처</summary>
+        static void TrackAlarms(ConveyorTwinController conveyor)
+        {
+            var now = new HashSet<string>(conveyor.Alarms.History.Where(a => a.Active).Select(a => a.Key));
+            double t = EditorApplication.timeSinceStartup - _startedAt;
+            foreach (var k in now.Except(ActiveAlarms))
+            {
+                var text = conveyor.Alarms.History.First(a => a.Active && a.Key == k).Text;
+                Logs.Add($"{t,6:F1}s  + {k}: {text}");
+                if (k.StartsWith("robot_") && Captured.Add(k)) Capture("alarm_" + k);
+            }
+            foreach (var k in ActiveAlarms.Except(now))
+                Logs.Add($"{t,6:F1}s  - {k}");
+            ActiveAlarms.Clear();
+            ActiveAlarms.UnionWith(now);
+        }
+
         static void Sample(RobotTwin robot, ConveyorTwinController conveyor)
         {
+            if (_startedAt < 0) _startedAt = EditorApplication.timeSinceStartup;
+            if (!_announced && robot.LinkState == ConveyorTwin.Twin.OpcUa.RobotLinkState.Connected)
+            {
+                _announced = true;
+                // 외부 장애 조율 스크립트가 이 줄을 보고 시점을 맞춘다
+                Debug.Log("[PlayState] robot connected");
+                Logs.Add($"{EditorApplication.timeSinceStartup - _startedAt,6:F1}s  로봇 접속");
+            }
+            TrackAlarms(conveyor);
+
             if (robot.CycleCount > 0)
             {
                 _firstCycle = Math.Min(_firstCycle, robot.CycleCount);
@@ -110,12 +142,11 @@ namespace ConveyorTwin.EditorTools
             if (robot.Holding && !_wasHolding)
             {
                 _grips++;
+                // RobotTwin이 박스를 TCP에 맞춰 붙이기 전의 오차 (벨트 위치 추정 + 관절 재생 시각의 정확도)
                 var box = robot.HeldBox.transform;
-                var top = box.position + box.up * box.lossyScale.y * 0.5f;
-                var d = top - robot.Tcp.position;
-                GripErrors.Add(d.magnitude);
-                Logs.Add($"{DateTime.Now:HH:mm:ss} [Grip {_grips}] 박스 윗면 - TCP = ({d.x * 1000:F1}, {d.y * 1000:F1}, {d.z * 1000:F1})mm, " +
-                         $"박스 길이 {box.lossyScale.z:F3}m, 사이클 {robot.CycleCount}");
+                if (!robot.LastGripDuringBadData) GripErrors.Add(robot.LastGripOffsetM);
+                Logs.Add($"{EditorApplication.timeSinceStartup - _startedAt,6:F1}s  [Grip {_grips}] 맞추기 전 오차 {robot.LastGripOffsetM * 1000:F1}mm" +
+                         $"{(robot.LastGripDuringBadData ? " (관절각 Bad 중 — 통계 제외)" : "")}, 박스 길이 {box.lossyScale.z:F3}m, 사이클 {robot.CycleCount}");
                 if (_grips <= 2) Capture($"grip_{_grips}");
             }
             if (robot.Holding && _wasHolding && _grips == 1 && _shots < 3 && robot.JointsDeg[0] < -40)
@@ -155,8 +186,8 @@ namespace ConveyorTwin.EditorTools
                 sb.AppendLine($"  집기 오차 (박스 윗면 ↔ TCP): 평균 {GripErrors.Average() * 1000:F1}mm, 최대 {GripErrors.Max() * 1000:F1}mm");
             if (placeErrors.Count > 0)
                 sb.AppendLine($"  놓기 오차 (박스 ↔ 칸 중심): 평균 {placeErrors.Average() * 1000:F1}mm, 최대 {placeErrors.Max() * 1000:F1}mm");
-            sb.AppendLine($"  경고 {Logs.Count}건");
-            foreach (var l in Logs.Take(20)) sb.AppendLine("    " + l);
+            sb.AppendLine($"  타임라인·경고 {Logs.Count}건");
+            foreach (var l in Logs.Take(80)) sb.AppendLine("    " + l);
             sb.AppendLine($"  캡처: dist/playcheck/ ({_shots}장)");
 
             bool ok = robot.LinkState == ConveyorTwin.Twin.OpcUa.RobotLinkState.Connected && _grips > 0 && _releases > 0 &&

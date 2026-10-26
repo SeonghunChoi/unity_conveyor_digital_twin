@@ -88,9 +88,11 @@ sealed class RobotNodeManager : CustomNodeManager2
         lock (Lock)
         {
             if (_vars.Count == 0) return;   // 주소 공간 생성 전
-            Set(RobotNodes.JointPositions, (double[])s.JointsDeg.Clone(), sourceTimeUtc);
+            // 엔코더 이상: 측정이 믿을 수 없으므로 값은 바꾸지 않고 상태만 Bad로 알린다 (OPC UA Part 8: BadSensorFailure)
+            var jointStatus = s.JointsBad ? (StatusCode)StatusCodes.BadSensorFailure : (StatusCode)StatusCodes.Good;
+            Set(RobotNodes.JointPositions, s.JointsBad ? _vars[RobotNodes.JointPositions].Value : (double[])s.JointsDeg.Clone(), sourceTimeUtc, jointStatus);
             for (int i = 0; i < 6; i++)
-                Set(RobotNodes.AxisActualPosition(i + 1), s.JointsDeg[i], sourceTimeUtc);
+                Set(RobotNodes.AxisActualPosition(i + 1), s.JointsBad ? _vars[RobotNodes.AxisActualPosition(i + 1)].Value : s.JointsDeg[i], sourceTimeUtc, jointStatus);
             Set(RobotNodes.MotorsOn, s.MotorsOn, sourceTimeUtc);
             Set(RobotNodes.SpeedOverride, s.SpeedOverridePct, sourceTimeUtc);
             Set(RobotNodes.ExecutionState, (int)s.Execution, sourceTimeUtc);
@@ -104,16 +106,18 @@ sealed class RobotNodeManager : CustomNodeManager2
         }
     }
 
-    void Set(string id, object value, DateTime ts)
+    void Set(string id, object value, DateTime ts) => Set(id, value, ts, StatusCodes.Good);
+
+    void Set(string id, object value, DateTime ts, StatusCode status)
     {
         var v = _vars[id];
         // 값이 그대로면 갱신하지 않는다. 어차피 서버의 데이터 변경 필터(기본 StatusValue)가 같은 값은 알림을 보내지 않으므로,
         // SourceTimestamp가 "마지막으로 값이 바뀐 시각"으로 남게 한다. 끊김 감지는 값 갱신이 아니라 구독 KeepAlive로 한다.
         bool same = value is double[] a && v.Value is double[] b ? a.AsSpan().SequenceEqual(b) : Equals(v.Value, value);
-        if (same) return;
+        if (same && v.StatusCode == status) return;
         v.Value = value;
         v.Timestamp = ts;
-        v.StatusCode = StatusCodes.Good;
+        v.StatusCode = status;
         v.ClearChangeMasks(SystemContext, false);
     }
 

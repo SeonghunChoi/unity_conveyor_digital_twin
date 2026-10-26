@@ -16,10 +16,15 @@ namespace ConveyorTwin.DummyServer.OpcUa;
 /// - 인증서 신뢰는 목록으로 관리한다 (자동 수락 끔). 트윈 인증서는 이 서버가 발급하면서 신뢰 목록에 넣는다
 ///   (<see cref="CertificateProvisioning"/>, 현장의 GDS 역할을 축소한 형태).
 /// - 사용자 인증은 익명. 트윈은 읽기만 하므로 쓰기 가능한 노드가 없다.
+/// - 서버는 내부 포트 4841에서 듣고, 외부 포트 4840은 <see cref="NetworkRelay"/>가 넘긴다 ("로봇 통신 끊김" 장애용, 7일 차).
+///   광고하는 엔드포인트 URL은 4841이지만 클라이언트는 설정한 URL(4840)로 접속한다 — 스택의 CoreClientUtils도 같은 방식이다.
 /// </summary>
 public sealed class RobotOpcUaServer : IAsyncDisposable
 {
     public const int Port = 4840;
+    /// <summary>OPC UA 서버가 실제로 듣는 포트 (외부 4840 → 중계 → 4841)</summary>
+    public const int InternalPort = 4841;
+    static readonly string InternalUrl = $"opc.tcp://127.0.0.1:{InternalPort}";
 
     /// <summary>서버 PKI 저장소. 단일 exe 배포 폴더가 아니라 사용자 데이터 폴더에 둔다</summary>
     public static string PkiRoot => Path.Combine(
@@ -29,12 +34,16 @@ public sealed class RobotOpcUaServer : IAsyncDisposable
         DefaultTelemetry.Create(b => b.SetMinimumLevel(LogLevel.Warning));
 
     readonly RobotNodeManagerFactory _factory = new();
+    readonly NetworkRelay _relay = new(Port, InternalPort);
     ApplicationInstance? _app;
     StandardServer? _server;
     ApplicationConfiguration? _config;
 
     /// <summary>활성 세션 이름 목록이 바뀔 때 (임의 스레드에서 호출)</summary>
     public event Action<IReadOnlyCollection<string>>? SessionsChanged;
+
+    /// <summary>로봇 통신 끊김 장애: 트윈과의 네트워크만 끊는다 (서버는 계속 동작)</summary>
+    public bool NetworkCut { get => _relay.Cut; set => _relay.Cut = value; }
 
     public async Task StartAsync()
     {
@@ -48,6 +57,7 @@ public sealed class RobotOpcUaServer : IAsyncDisposable
         var sm = _server.CurrentInstance.SessionManager;
         sm.SessionActivated += (_, _) => RaiseSessions();
         sm.SessionClosing += (_, _) => RaiseSessions();
+        _relay.Start();
     }
 
     /// <summary>서버 애플리케이션 설정과 인스턴스 인증서 (없으면 만든다). 발급 모드에서도 같은 것을 쓴다</summary>
@@ -60,7 +70,7 @@ public sealed class RobotOpcUaServer : IAsyncDisposable
         };
 #pragma warning disable CS0618 // 주체 이름 + PKI 루트만 주는 오버로드 (저장소 경로를 own/trusted/issuer/rejected로 만든다)
         var config = await app.Build(OpcUaEndpoint.ServerApplicationUri, OpcUaEndpoint.ProductUri)
-            .AsServer(new[] { OpcUaEndpoint.Url })
+            .AsServer(new[] { InternalUrl })
             .AddUnsecurePolicyNone()
             .AddSignAndEncryptPolicies()
             .AddUserTokenPolicy(UserTokenType.Anonymous)
@@ -96,6 +106,7 @@ public sealed class RobotOpcUaServer : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        await _relay.DisposeAsync();
         if (_server != null)
         {
             await _server.StopAsync();

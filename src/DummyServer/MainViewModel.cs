@@ -124,6 +124,38 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     }
 
     ConveyorSimulator? _sim;
+    RobotController? _robotCtl;
+
+    // ---- 로봇 셀 장애 버튼 (2단계 7일 차) ----
+    bool _faultRobotNet, _faultEStop, _faultVacuum, _faultEncoder;
+
+    /// <summary>로봇 통신 끊김: 트윈과의 네트워크(OPC UA 중계)만 끊는다. 로봇은 계속 동작</summary>
+    public bool FaultRobotNetwork
+    {
+        get => _faultRobotNet;
+        set { if (Set(ref _faultRobotNet, value)) _opcua.NetworkCut = value; }
+    }
+
+    /// <summary>비상정지: 로봇이 그 자리에서 멈추고 모터 전원 차단</summary>
+    public bool FaultEStop
+    {
+        get => _faultEStop;
+        set { if (Set(ref _faultEStop, value) && _robotCtl != null) _robotCtl.EmergencyStop = value; }
+    }
+
+    /// <summary>흡착 실패: 진공을 켜도 압력 스위치가 잡히지 않음 → 프로그램 정지, 해제하면 재시도</summary>
+    public bool FaultVacuum
+    {
+        get => _faultVacuum;
+        set { if (Set(ref _faultVacuum, value) && _robotCtl != null) _robotCtl.VacuumFailure = value; }
+    }
+
+    /// <summary>관절 엔코더 이상: 관절각 StatusCode Bad</summary>
+    public bool FaultEncoder
+    {
+        get => _faultEncoder;
+        set { if (Set(ref _faultEncoder, value) && _robotCtl != null) _robotCtl.EncoderFault = value; }
+    }
 
     public MainViewModel()
     {
@@ -148,7 +180,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         // 2단계: 로봇 OPC UA 서버 + 가상 로봇 컨트롤러 (출구에 멈춘 물건을 집어 팔레트에 적재)
         await _opcua.StartAsync();
         OpcUaStatus = "대기 중";
-        var robot = new RobotController(_opcua, _sim);
+        var robot = _robotCtl = new RobotController(_opcua, _sim);
         robot.Updated += r => _robot = r;
         _robotTask = Task.Run(() => robot.RunAsync(_cts.Token));
     }

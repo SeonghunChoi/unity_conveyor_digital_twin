@@ -75,6 +75,19 @@
                     <ToggleButton IsChecked="{Binding FaultJam}" Content="물건 걸림" ToolTip="벨트 중간 물건이 멈춤 → 출구 미감지, 뒤 물건 적체, 전류 +1.2A"/>
                     <ToggleButton IsChecked="{Binding FaultMotor}" Content="모터 정지" ToolTip="state/run = fault, 속도 0"/>
                 </WrapPanel>
+                <TextBlock Style="{StaticResource Caption}" Margin="0,8,8,2" Text="로봇 셀 장애 (OPC UA)"/>
+                <WrapPanel>
+                    <WrapPanel.Resources>
+                        <Style TargetType="ToggleButton">
+                            <Setter Property="Padding" Value="12,6"/>
+                            <Setter Property="Margin" Value="0,4,8,0"/>
+                        </Style>
+                    </WrapPanel.Resources>
+                    <ToggleButton IsChecked="{Binding FaultRobotNetwork}" Content="로봇 통신 끊김" ToolTip="OPC UA 중계(4840→4841)를 끊음: 세션 강제 종료, 새 접속 거부. 로봇 컨트롤러는 계속 동작 (서버 시작 시각 그대로)"/>
+                    <ToggleButton IsChecked="{Binding FaultEStop}" Content="비상정지" ToolTip="로봇이 그 자리에서 정지, MotorsOn=false, EmergencyStop=true, 프로그램 정지. 해제 1초 뒤 모터 ON, 멈춘 동작을 이어 감"/>
+                    <ToggleButton IsChecked="{Binding FaultVacuum}" Content="흡착 실패" ToolTip="다음 픽에서 진공 ON인데 압력 스위치가 안 잡힘 → 1초 뒤 진공 OFF, 프로그램 정지. 해제하면 재시도"/>
+                    <ToggleButton IsChecked="{Binding FaultEncoder}" Content="관절 엔코더 이상" ToolTip="JointPositions·ActualPosition의 StatusCode = BadSensorFailure (값은 마지막 값), 로봇은 계속 움직임"/>
+                </WrapPanel>
             </StackPanel>
         </Border>
 

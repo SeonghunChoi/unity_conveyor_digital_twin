@@ -169,6 +169,8 @@ namespace ConveyorTwin.Twin
         /// <summary>벨트 루프 전체 길이 = 2 × 드럼 간 거리 + 2πr</summary>
         public static double BeltLoopLengthM => 2.0 * Equipment.BeltLengthM + 2.0 * Math.PI * BeltOuterRadiusM;
         public TwinAlarms Alarms { get; } = new TwinAlarms();
+        /// <summary>다른 설비(로봇 셀)의 알람 조건을 같은 알람 목록에 더한다 (RobotTwin이 설정)</summary>
+        public Action<List<AlarmCondition>> AppendConditions;
         readonly List<AlarmCondition> _conditions = new List<AlarmCondition>();
         public Transform DrumHead => _drumHead;
         public Transform DrumTail => _drumTail;
@@ -567,6 +569,7 @@ namespace ConveyorTwin.Twin
                 into.Add(new AlarmCondition("screen_delay", AlarmSeverity.Warning, $"화면 지연 {delay / 1000.0:F1}s (서버 시각 기준 재생)"));
             if (_tracker.Resyncing)
                 into.Add(new AlarmCondition("resync", AlarmSeverity.Info, "물건 추적 재동기화 중"));
+            AppendConditions?.Invoke(into);
         }
 
         public int JammedCount

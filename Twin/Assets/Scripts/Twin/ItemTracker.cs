@@ -171,8 +171,10 @@ namespace ConveyorTwin.Twin
 
                 // FIFO 맨 앞 물건이라도 출구까지 올 만큼 이동하지 않았다면 그 물건이 아니다:
                 // 트윈이 입구 감지를 보지 못한 물건(재동기화 전부터 벨트 위에 있던 물건)이 나간 것
+                // 짝 판정은 추정 위치(FrontM)로 한다. TravelM은 출구가 막힌 동안 멈추므로(잼 판단용, 2단계)
+                // 출구 앞에 줄 서 있던 물건이 짝을 못 찾고 "추적 밖"이 되는 문제가 있었다 (7일 차 비상정지 시험에서 발견)
                 var item = _items.Find(i => !i.AtExit);
-                if (item == null || item.TravelM < Equipment.BeltLengthM * MinExitTravelRatio)
+                if (item == null || item.FrontM < Equipment.BeltLengthM * MinExitTravelRatio)
                 {
                     Untracked++;
                     _untrackedAtExit = true;
