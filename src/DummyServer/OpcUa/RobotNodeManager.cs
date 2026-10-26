@@ -12,7 +12,7 @@ namespace ConveyorTwin.DummyServer.OpcUa;
 ///       Axes/Axis1..6/ParameterSet/ActualPosition
 ///     Controllers/IRC5                          (Controller: MotorsOn, SpeedOverride)
 ///       TaskControls/T_ROB1/ParameterSet        (TaskProgramName, ExecutionState, CycleCount)
-///       IO                                      (DO_VacuumOn, DI_VacuumOk)
+///       IO                                      (DO_VacuumOn, DI_VacuumOk, DI_PalletPresent)
 ///     SafetyStates/SafetyState/ParameterSet     (OperationalMode, EmergencyStop, ProtectiveStop)
 /// </summary>
 sealed class RobotNodeManager : CustomNodeManager2
@@ -67,6 +67,7 @@ sealed class RobotNodeManager : CustomNodeManager2
             var io = Obj(ctrl, RobotNodes.Io, "IO");
             Var(io, RobotNodes.VacuumOn, "DO_VacuumOn", DataTypeIds.Boolean, ValueRanks.Scalar, false, "진공 켜기 출력");
             Var(io, RobotNodes.VacuumOk, "DI_VacuumOk", DataTypeIds.Boolean, ValueRanks.Scalar, false, "진공 압력 스위치 (물건 흡착됨)");
+            Var(io, RobotNodes.PalletPresent, "DI_PalletPresent", DataTypeIds.Boolean, ValueRanks.Scalar, true, "팔레트 존재 센서 (교체 중 false)");
 
             // ---- SafetyState ----
             var safeties = Folder(system, RobotNodes.System + ".SafetyStates", "SafetyStates");
@@ -96,6 +97,7 @@ sealed class RobotNodeManager : CustomNodeManager2
             Set(RobotNodes.CycleCount, s.CycleCount, sourceTimeUtc);
             Set(RobotNodes.VacuumOn, s.VacuumOn, sourceTimeUtc);
             Set(RobotNodes.VacuumOk, s.VacuumOk, sourceTimeUtc);
+            Set(RobotNodes.PalletPresent, s.PalletPresent, sourceTimeUtc);
             Set(RobotNodes.OperationalMode, (int)s.Mode, sourceTimeUtc);
             Set(RobotNodes.EmergencyStop, s.EmergencyStop, sourceTimeUtc);
             Set(RobotNodes.ProtectiveStop, s.ProtectiveStop, sourceTimeUtc);

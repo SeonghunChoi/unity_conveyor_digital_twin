@@ -18,6 +18,10 @@ public sealed record ConveyorSnapshot(
 /// 물건은 앞 물건을 추월하지 못한다 (걸린 물건 뒤로 쌓인다).
 ///
 /// 설비 장애(물건 걸림, 모터 정지, 이상값)는 UI 스레드에서 플래그로 켜고, 시뮬레이션 루프가 매 틱 반영한다.
+///
+/// 2단계: 출구에 스토퍼가 있어 앞단이 출구 센서(벨트 끝)에 닿은 물건은 그 자리에 멈춰 로봇을 기다린다.
+/// 로봇이 집어 들면(<see cref="RequestPick"/>) 벨트에서 사라지고 출구 센서가 풀린다 (blocked: false).
+/// 출구에 물건이 있는 동안 뒤 물건은 그 뒤로 쌓인다 — 로봇 사이클이 투입 간격보다 짧아 정상 운전에서는 쌓이지 않는다.
 /// </summary>
 public sealed class ConveyorSimulator
 {
@@ -34,8 +38,9 @@ public sealed class ConveyorSimulator
     // ---- 물건 (박스) ----
     const double ItemLengthM = 0.30;
     const double MinGapM = 0.40;            // 앞 물건 뒷단과의 최소 간격
-    const double SpawnIntervalMinS = 2.5;
-    const double SpawnIntervalMaxS = 5.0;
+    // 투입 간격: 로봇 사이클(약 SpawnIntervalMinS - 1초, docs/robot-cell.md)보다 길어야 출구에 물건이 쌓이지 않는다
+    const double SpawnIntervalMinS = 6.0;
+    const double SpawnIntervalMaxS = 8.0;
     const double ItemWeightMinKg = 2.0;
     const double ItemWeightMaxKg = 15.0;
 
@@ -68,6 +73,10 @@ public sealed class ConveyorSimulator
     double _nextSpawnS;
     long _delivered;
 
+    volatile bool _pickRequested;
+    volatile bool _partAtPick;
+    double _partWeightKg;
+
     volatile bool _jamRequested;
     volatile bool _jamClearRequested;
     bool _jamPending;   // 걸릴 물건이 없어서 다음 물건이 JamPositionM에 오기를 기다림
@@ -85,6 +94,15 @@ public sealed class ConveyorSimulator
         _pub = publisher;
         _deviceId = deviceId;
     }
+
+    /// <summary>출구 스토퍼에 물건이 멈춰 있다 (로봇의 픽 조건, 임의 스레드에서 읽음)</summary>
+    public bool PartAtPick => _partAtPick;
+
+    /// <summary>출구에 멈춘 물건의 무게 (PartAtPick일 때만 의미 있음)</summary>
+    public double PartWeightKg => Volatile.Read(ref _partWeightKg);
+
+    /// <summary>로봇이 출구의 물건을 집어 들었다. 다음 틱에 벨트에서 빼고 출구 센서 해제를 발행한다</summary>
+    public void RequestPick() => _pickRequested = true;
 
     /// <summary>물건 걸림 장애: 벨트 중간의 물건 하나가 멈춘다</summary>
     public void RequestJam() => _jamRequested = true;
@@ -185,6 +203,18 @@ public sealed class ConveyorSimulator
 
     async Task MoveItemsAsync(double dt, CancellationToken ct)
     {
+        // 로봇이 출구의 물건을 집어 감: 물건이 센서 앞에서 위로 빠지므로 출구 센서가 풀린다
+        if (_pickRequested)
+        {
+            _pickRequested = false;
+            if (_items.Count > 0 && AtStopper(_items[0]))
+            {
+                _items.RemoveAt(0);
+                _delivered++;
+                await _pub.PublishEdgeAsync(Topics.ExitSensor(_deviceId), false, ct);
+            }
+        }
+
         double move = _speed * dt;
         for (int i = 0; i < _items.Count; i++)
         {
@@ -195,6 +225,8 @@ public sealed class ConveyorSimulator
                 // 앞 물건(먼저 들어온 물건)을 추월하지 못한다: 걸린 물건 뒤에 쌓인다
                 if (i > 0)
                     next = Math.Min(next, _items[i - 1].FrontM - ItemLengthM);
+                // 출구 스토퍼: 앞단이 벨트 끝을 넘지 못한다 (벨트는 계속 돌고 물건만 멈춘다)
+                next = Math.Min(next, Equipment.BeltLengthM);
                 item.FrontM = Math.Max(item.FrontM, next);
 
                 if (_jamPending && !item.ExitBlocked && item.FrontM >= JamPositionM)
@@ -214,14 +246,14 @@ public sealed class ConveyorSimulator
                 item.ExitBlocked = true;
                 await _pub.PublishEdgeAsync(Topics.ExitSensor(_deviceId), true, ct);
             }
-            if (item.FrontM - ItemLengthM >= Equipment.BeltLengthM)
-            {
-                await _pub.PublishEdgeAsync(Topics.ExitSensor(_deviceId), false, ct);
-                _items.RemoveAt(i--);
-                _delivered++;
-            }
         }
+
+        var first = _items.Count > 0 ? _items[0] : null;
+        if (first != null && AtStopper(first)) Volatile.Write(ref _partWeightKg, first.WeightKg);
+        _partAtPick = first != null && AtStopper(first);
     }
+
+    static bool AtStopper(Item item) => item.ExitBlocked && item.FrontM >= Equipment.BeltLengthM - 1e-9;
 
     /// <summary>입구에 물건 투입: 입구 센서 감지 + 입구 로드셀 무게</summary>
     async Task TrySpawnAsync(double now, CancellationToken ct)

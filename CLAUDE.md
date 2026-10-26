@@ -56,6 +56,8 @@ claude.ai에서 진행한 기획 대화의 결정 사항을 옮겨 왔습니다.
 - `Equipment`: 벨트 길이(1.95m)와 잼 판단 배수(1.5). 서버는 물건 이동 시뮬레이션에, 트윈은 잼 판단에 쓴다.
 - `RobotCell` (2단계): 로봇 셀 배치·적재 패턴. 좌표는 **로봇 베이스 좌표계**(ABB base frame, m, Z-up 오른손, +X = 컨베이어 쪽).
   트윈에서 Unity 월드 = (0, 0, 1.70) + (y, z, −x). 박스 크기는 1단계 값(0.30×0.20×0.15)과 같아야 한다. 상세 `docs/robot-cell.md`.
+- `RobotKinematics` (2단계): IRB 2600 링크 치수·가동 범위·최대 속도와 공구 수직 하향 해석적 IK(`SolveTopDown`, J6 = J1로 박스 방향 유지).
+  서버 가상 로봇 컨트롤러와 트윈 에디터 셀 점검이 쓴다. **트윈 런타임은 쓰지 않는다** (관절각만 따른다).
 - `RobotNodes` / `OpcUaEndpoint` (2단계): 로봇 OPC UA 노드 ID(문자열 ID, 네임스페이스 `urn:conveyortwin:robotcell`, 인덱스는 접속 후 조회),
   운전 모드·실행 상태 열거형, 서버·트윈 신원(ApplicationUri·인증서 주체)과 발급 인수. 상세 `docs/robot-opcua.md`.
 - `Messages`: 데이터 메시지는 모두 `Envelope`(sid/seq/ts)를 상속한다. 예외로 `StatusMessage`는 seq가 없다 (Last Will로 브로커가 대신 발행하므로).
@@ -115,7 +117,7 @@ claude.ai에서 진행한 기획 대화의 결정 사항을 옮겨 왔습니다.
 | 1 | 로봇 기종·CAD 확정, 셀 배치, OPC UA 스파이크 (Unity 배포 빌드에서 접속 확인) | ✅ 완료 (`docs/opcua-spike.md`, `docs/cad-robot.md`) |
 | 2 | 로봇 CAD 변환 (기존 파이프라인 재사용), 관절 피벗·계층 정리, 그리퍼·팔레트 | ✅ 완료 (관절 계층 glb, 진공 그리퍼·EUR 팔레트, 셀 배치 48칸 도달 확인 `docs/robot-cell.md`) |
 | 3 | 서버 OPC UA 서버 골격, 로봇 정보 모델 (관절각, 모드, 프로그램 상태, 그리퍼, 사이클 수) | ✅ 완료 (40010 참고 단순화 모델, 서버 exe 인증서 발급, `docs/robot-opcua.md`) |
-| 4 | 서버 가상 로봇 컨트롤러: 관절 공간 보간, 출구 도착 → 픽 사이클, 팔레트 적재 패턴 | |
+| 4 | 서버 가상 로봇 컨트롤러: 관절 공간 보간, 출구 도착 → 픽 사이클, 팔레트 적재 패턴 | ✅ 완료 (출구 스토퍼, MoveJ식 5차 보간, 팔레트 교체 `DI_PalletPresent`, `docs/robot-cell.md`) |
 | 5 | 트윈 OPC UA 클라이언트: 구독, StatusCode·SourceTimestamp 검증, 재연결 | |
 | 6 | 트윈 로봇 미러링, 물건 인계 (컨베이어 → 그리퍼 → 팔레트) | |
 | 7 | 셀 장애 버튼 + 트윈 대응 (OPC UA 세션 끊김, 비상정지, 픽 실패 등) ★ | |
@@ -186,3 +188,6 @@ dotnet run --project src/DummyServer  # 더미 서버 실행 (브로커 127.0.0.
 - 더미 서버의 가상 설비(`DevicePublisher`)는 브로커 내부 API가 아니라 **일반 MQTT 클라이언트로 접속**해 발행한다.
   그래야 Last Will이 실제로 동작한다 (8일 차 "연결 끊김" 장애). Will로 온 offline의 `ts`는 접속 시각이므로 트윈은 수신 시각을 쓴다.
 - 서버 시뮬레이션은 물건 위치를 속도 적분으로 진행시키므로, 속도를 0으로 만들면 물건도 멈춘다 (모터 정지·물건 걸림 장애의 기반).
+- **2단계 출구 스토퍼**: 출구에 닿은 물건은 멈춰 있다가 로봇이 집을 때 출구 `blocked: false`가 온다 (`DI_VacuumOk` ON과 같은 틱).
+  투입 간격(6~8s)은 로봇이 출구를 비우는 시간보다 길어야 한다 — 로봇 동작을 느리게 바꾸면 박스가 쌓여 트윈이 잼으로 오판할 수 있다.
+- `OpcUaProbe <pki> watch <초>`: OPC UA 로봇 신호 + MQTT 출구 센서를 함께 기록해 인계 순서·관절 속도·출구 대기 시간을 분석한다.

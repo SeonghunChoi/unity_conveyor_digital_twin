@@ -11,12 +11,16 @@ using Opc.Ua.Configuration;
 // 1) 접속 2) RobotCell01 아래 주소 공간 탐색·값 출력 3) JointPositions·ExecutionState 3초 구독
 // 종료 코드 0 = 성공.
 
+//   dotnet run --project src/Tools/OpcUaProbe -- <트윈 pki 경로> watch <초>
+// watch: 로봇 신호(OPC UA)와 컨베이어 출구 센서(MQTT)를 함께 기록해 사이클·인계 순서·관절 속도를 분석한다 (4일 차).
+
 if (args.Length < 1)
 {
-    Console.WriteLine("사용법: OpcUaProbe <트윈 pki 경로> [Basic256Sha256|None]");
+    Console.WriteLine("사용법: OpcUaProbe <트윈 pki 경로> [Basic256Sha256|None] | <트윈 pki 경로> watch <초>");
     return 2;
 }
 var pkiRoot = Path.GetFullPath(args[0]);
+int watchSeconds = args.Length > 2 && args[1] == "watch" ? int.Parse(args[2]) : 0;
 var policy = args.Length > 1 && args[1] == "None" ? SecurityPolicies.None : OpcUaEndpoint.SecurityPolicy;
 var mode = policy == SecurityPolicies.None ? MessageSecurityMode.None : MessageSecurityMode.SignAndEncrypt;
 
@@ -58,6 +62,8 @@ try
 {
     var ns = (ushort)session.NamespaceUris.GetIndex(RobotNodes.NamespaceUri);
     Console.WriteLine($"[Probe] 네임스페이스 {RobotNodes.NamespaceUri} = ns={ns}");
+    if (watchSeconds > 0)
+        return await Watch.RunAsync(session, ns, watchSeconds);
 
     // ---- 주소 공간 탐색 ----
     int variables = 0;

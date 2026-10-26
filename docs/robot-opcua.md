@@ -67,6 +67,7 @@ Objects/RobotCell01                                   MotionDeviceSystem
     IO
       DO_VacuumOn             Boolean 진공 켜기 출력
       DI_VacuumOk             Boolean 진공 압력 스위치 (물건 흡착됨)
+      DI_PalletPresent        Boolean 팔레트 존재 센서 (가득 찬 팔레트 교체 중 false)
   SafetyStates/SafetyState/ParameterSet               SafetyState
     OperationalMode           Int32   40010 OperationalModeEnumeration (3 = Automatic)
     EmergencyStop             Boolean
@@ -77,6 +78,8 @@ Objects/RobotCell01                                   MotionDeviceSystem
 
 - **JointPositions 배열**: 40010은 축마다 `ActualPosition`을 둡니다. 축별 노드를 따로 구독하면 같은 순간의 6축이 서로 다른 알림으로
   나뉘어 들어와 자세가 잠깐 찢어질 수 있으므로, 한 SourceTimestamp에 6축을 담은 배열을 따로 둡니다. 축별 노드도 같은 값으로 갱신합니다.
+- **팔레트 교체**: 48칸이 차면 컨트롤러가 대기 자세에서 교체를 기다리는 동안 `DI_PalletPresent`가 false가 된다.
+  트윈은 이 신호로 팔레트 위에 그려 둔 박스를 비운다 (몇 개가 쌓였는지는 트윈이 직접 센 값이 아니라 현실의 신호로 맞춘다).
 - **원시 신호만**: 그리퍼는 "출력(진공 켜기)"과 "입력(압력 스위치)"을 따로 냅니다. 진공을 켰는데 압력이 안 잡히면 픽 실패 —
   이 판단은 서버가 아니라 트윈이 합니다 (원칙 2). 정지 원인도 `MotorsOn`·`EmergencyStop`·`ProtectiveStop`·`ExecutionState` 조합으로 트윈이 추론합니다.
 - **열거형은 Int32**: 40010은 열거 DataType을 쓰지만, 단순화 모델에서는 Int32 + 설명(Description)으로 대신합니다. 값은 `Shared.OperationalMode`·`ProgramExecutionState`.
@@ -105,5 +108,5 @@ dotnet run --project src/Tools/OpcUaProbe -- C:\temp\twin-pki None       # 보�
 | 단일 exe 배포본 (`dotnet publish … PublishSingleFile`)의 발급 모드·접속·구독 | ✅ |
 | JointPositions 구독 | 홈 자세 고정이라 최초 1건 (값이 바뀌지 않으면 알림 없음 — 정상) |
 
-3일 차의 로봇은 홈 자세·자동 모드·모터 켜짐·프로그램 정지 상태만 내는 임시 구현(`Simulation/RobotPlaceholder`)이고,
-4일 차 가상 로봇 컨트롤러가 관절 보간과 픽·적재 사이클로 값을 채웁니다.
+4일 차부터 가상 로봇 컨트롤러(`Simulation/RobotController`, [robot-cell.md](robot-cell.md))가 관절 보간과 픽·적재 사이클로 값을 채웁니다.
+`OpcUaProbe <pki> watch <초>`는 로봇 신호와 컨베이어 출구 센서(MQTT)를 함께 기록해 인계 순서·관절 속도를 분석합니다.

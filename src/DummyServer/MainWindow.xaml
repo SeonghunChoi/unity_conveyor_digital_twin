@@ -50,6 +50,10 @@
                     <TextBlock Style="{StaticResource Value}" Text="{Binding CurrentText}"/></StackPanel>
                 <StackPanel><TextBlock Style="{StaticResource Caption}" Text="물건"/>
                     <TextBlock Style="{StaticResource Value}" Text="{Binding ItemsText}"/></StackPanel>
+                <StackPanel><TextBlock Style="{StaticResource Caption}" Text="로봇 (단계 · 사이클 · 팔레트)"/>
+                    <TextBlock Style="{StaticResource Value}" Text="{Binding RobotText}"/></StackPanel>
+                <StackPanel><TextBlock Style="{StaticResource Caption}" Text="관절각 J1~J6 [°]"/>
+                    <TextBlock Style="{StaticResource Value}" Text="{Binding JointsText}"/></StackPanel>
             </WrapPanel>
         </Border>
 

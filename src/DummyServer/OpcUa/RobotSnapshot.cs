@@ -16,9 +16,10 @@ public sealed record RobotSnapshot(
     bool EmergencyStop,
     bool ProtectiveStop,
     bool VacuumOn,
-    bool VacuumOk)
+    bool VacuumOk,
+    bool PalletPresent)
 {
     /// <summary>홈 자세, 자동 모드, 모터 켜짐, 프로그램 정지</summary>
     public static RobotSnapshot Home() => new(new double[6], true, 100.0, OperationalMode.Automatic,
-        ProgramExecutionState.Stopped, 0, false, false, false, false);
+        ProgramExecutionState.Stopped, 0, false, false, false, false, true);
 }

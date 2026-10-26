@@ -16,8 +16,8 @@ namespace ConveyorTwin.EditorTools
     ///  3. 그 관절각을 실제 Unity 로봇에 넣었을 때 TCP가 목표에 오는지 (관절 규약·그리퍼 길이까지 한 번에 검증)
     ///  4. 개요·픽·먼 칸 적재 자세 화면 캡처 → dist/cellcheck/*.png
     ///
-    /// 여기의 역기구학(IK)은 배치 점검용이다. 트윈 런타임은 IK를 하지 않고 서버가 보낸 관절각만 따른다 (원칙 1).
-    /// 4일 차 서버 가상 컨트롤러가 같은 계산으로 목표 관절각을 만든다.
+    /// IK는 Shared.RobotKinematics — 서버 가상 로봇 컨트롤러가 목표 관절각을 만드는 것과 같은 계산이다.
+    /// 트윈 런타임은 IK를 하지 않고 서버가 보낸 관절각만 따른다 (원칙 1).
     ///
     /// 명령줄: Unity.exe -batchmode -quit -projectPath Twin -executeMethod ConveyorTwin.EditorTools.RobotCellCheck.CheckBatch -logFile cell-check.log
     /// </summary>
@@ -26,25 +26,13 @@ namespace ConveyorTwin.EditorTools
         const string ScenePath = "Assets/Scenes/Twin.unity";
         const float Tolerance = 0.001f;   // TCP 위치 허용 오차 1mm
 
-        // IRB 2600-20/1.65 기구학 (m, docs/cad-robot.md) — 베이스 좌표 (r, z) 평면
-        const double J2R = 0.150, J2Z = 0.445, L2 = 0.700;
-        const double ForearmX = 0.795, ForearmZ = 0.115;   // J3 → J5 (홈 자세)
-        const double WristToFlange = 0.085;
-        static readonly double L3 = Math.Sqrt(ForearmX * ForearmX + ForearmZ * ForearmZ);
-        static readonly double Beta0 = Math.Atan2(ForearmZ, ForearmX) * Rad2Deg;
-
-        // 관절 가동 범위 (도, ABB IRB 2600 제품 자료)
-        static readonly double[] Min = { -180, -95, -180, -400, -120, -400 };
-        static readonly double[] Max = { 180, 155, 75, 400, 120, 400 };
-
+        const float YawToleranceDeg = 0.1f;   // 그리퍼 수평 방향 허용 오차
         // 관절 규약: localRotation = AngleAxis(θ, 축)  (docs/cad-robot.md 4절, RobotImportCheck로 검증)
         static readonly Vector3[] UnityAxes =
         {
             new Vector3(0, -1, 0), new Vector3(0, 0, 1), new Vector3(0, 0, 1),
             new Vector3(1, 0, 0), new Vector3(0, 0, 1), new Vector3(1, 0, 0),
         };
-
-        const double Rad2Deg = 180.0 / Math.PI;
 
         [MenuItem("Tools/Twin/Check Robot Cell")]
         static void CheckMenu() => Check();
@@ -102,21 +90,22 @@ namespace ConveyorTwin.EditorTools
 
             double worstReach = 0, worstLimitMargin = double.MaxValue;
             string worstReachName = null, worstLimitName = null;
-            float worstTcpErr = 0;
+            float worstTcpErr = 0, worstYawErr = 0;
             double[] pickQ = null, farQ = null;
+            Vector3? pickYawAxis = null;
+            var gripper = RobotCellBuilder.FindDeep(robot.transform, "Gripper");
             foreach (var (name, p) in targets)
             {
-                if (!SolveTopDown(p, out var q, out double reachRatio, out string why))
+                // Shared.RobotKinematics: 서버 가상 로봇 컨트롤러와 같은 IK
+                bool solved = RobotKinematics.SolveTopDown(p, RobotCell.GripperLengthM, out var q, out double reachRatio);
+                double margin = RobotKinematics.LimitMarginDeg(q, out int tightJoint);
+                if (!solved)
                 {
                     ok = false;
-                    sb.AppendLine($"  {name} {p}: 도달 불가 — {why}");
+                    sb.AppendLine(reachRatio > 1 || reachRatio < 0.05
+                        ? $"  {name} {p}: 도달 불가 (사용률 {reachRatio:P0})"
+                        : $"  {name} {p}: J{tightJoint + 1} 가동 범위 초과 (q={Fmt(q)})");
                     continue;
-                }
-                double margin = LimitMargin(q, out int tightJoint);
-                if (margin < 0)
-                {
-                    ok = false;
-                    sb.AppendLine($"  {name} {p}: J{tightJoint + 1} 가동 범위 초과 (q={Fmt(q)})");
                 }
                 if (reachRatio > worstReach) { worstReach = reachRatio; worstReachName = name; }
                 if (margin < worstLimitMargin) { worstLimitMargin = margin; worstLimitName = $"{name} J{tightJoint + 1}"; }
@@ -129,6 +118,16 @@ namespace ConveyorTwin.EditorTools
                     ok = false;
                     sb.AppendLine($"  {name}: TCP {tcp.position:F4} / 목표 {RobotCellBuilder.CellToWorld(p):F4} 오차 {tcpErr:F4}m");
                 }
+                // 그리퍼 수평 방향(요): J6 = J1 보정으로 픽 때와 같아야 박스가 같은 방향으로 놓인다
+                var yawAxis = Vector3.ProjectOnPlane(gripper.forward, Vector3.up).normalized;
+                if (pickYawAxis == null) pickYawAxis = yawAxis;
+                float yawErr = Vector3.Angle(pickYawAxis.Value, yawAxis);
+                worstYawErr = Mathf.Max(worstYawErr, yawErr);
+                if (yawErr > YawToleranceDeg)
+                {
+                    ok = false;
+                    sb.AppendLine($"  {name}: 그리퍼 방향이 픽 때와 {yawErr:F1}° 다름");
+                }
                 if (name == "Pick") pickQ = q;
                 if (name == "Slot32") farQ = q;   // 3단 첫 칸 = 가장 높고 먼 줄의 끝
             }
@@ -136,6 +135,7 @@ namespace ConveyorTwin.EditorTools
             sb.AppendLine($"  도달 여유: 최대 사용률 {worstReach:P0} ({worstReachName}) — J2→손목 거리 / (상완+전완)");
             sb.AppendLine($"  관절 여유: 최소 {worstLimitMargin:F1}° ({worstLimitName})");
             sb.AppendLine($"  TCP 오차: 최대 {worstTcpErr * 1000:F2} mm (Unity 로봇에 관절각을 넣어 측정)");
+            sb.AppendLine($"  그리퍼 방향 오차: 최대 {worstYawErr:F2}° (J6 = J1 보정)");
             if (pickQ != null) sb.AppendLine($"  픽 자세 q={Fmt(pickQ)}");
             if (farQ != null) sb.AppendLine($"  Slot32 자세 q={Fmt(farQ)}");
 
@@ -154,50 +154,6 @@ namespace ConveyorTwin.EditorTools
             sb.AppendLine(ok ? "  결과: 모두 통과" : "  결과: 실패 항목 있음");
             if (ok) Debug.Log(sb.ToString()); else Debug.LogError(sb.ToString());
             return ok;
-        }
-
-        /// <summary>
-        /// 공구가 수직으로 내려보는 자세의 해석적 IK (팔꿈치 위, J4 = 0).
-        /// 각도는 ABB 부호(베이스 좌표 오른손): J2 + 팔 앞으로, J3 + 팔 아래로, J5 + 손목 아래로.
-        /// </summary>
-        static bool SolveTopDown(CellPoint tcp, out double[] q, out double reachRatio, out string why)
-        {
-            q = new double[6];
-            reachRatio = 0;
-            why = null;
-
-            // 손목 중심(J5) = TCP 위로 그리퍼 + 플랜지 거리
-            double wx = tcp.X, wy = tcp.Y, wz = tcp.Z + RobotCell.GripperLengthM + WristToFlange;
-            double j1 = Math.Atan2(wy, wx) * Rad2Deg;
-            double r = Math.Sqrt(wx * wx + wy * wy) - J2R;
-            double z = wz - J2Z;
-            double d = Math.Sqrt(r * r + z * z);
-            reachRatio = d / (L2 + L3);
-            if (d > L2 + L3 || d < Math.Abs(L2 - L3)) { why = $"J2→손목 {d:F3}m, 범위 {Math.Abs(L2 - L3):F3}~{L2 + L3:F3}m"; return false; }
-
-            double phi = Math.Atan2(z, r);
-            double alpha = Math.Acos((L2 * L2 + d * d - L3 * L3) / (2 * L2 * d));
-            double e2 = phi + alpha;                                  // 상완 앙각 (수평 기준)
-            double er = L2 * Math.Cos(e2), ez = L2 * Math.Sin(e2);   // 팔꿈치(J3) 위치
-            double e3 = Math.Atan2(z - ez, r - er);                   // J3 → 손목 방향 앙각
-
-            double j2 = 90.0 - e2 * Rad2Deg;
-            double j3 = Beta0 - j2 - e3 * Rad2Deg;
-            double j5 = 90.0 - j2 - j3;                               // 공구 방향 = −(J2+J3+J5) = −90°
-            q[0] = j1; q[1] = j2; q[2] = j3; q[3] = 0; q[4] = j5; q[5] = 0;
-            return true;
-        }
-
-        static double LimitMargin(double[] q, out int joint)
-        {
-            double m = double.MaxValue;
-            joint = 0;
-            for (int i = 0; i < 6; i++)
-            {
-                double mi = Math.Min(q[i] - Min[i], Max[i] - q[i]);
-                if (mi < m) { m = mi; joint = i; }
-            }
-            return m;
         }
 
         static void Apply(Transform[] joints, double[] q)

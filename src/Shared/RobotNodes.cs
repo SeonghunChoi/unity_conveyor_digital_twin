@@ -60,6 +60,9 @@ namespace ConveyorTwin.Shared
         public const string VacuumOn = Io + ".DO_VacuumOn";
         /// <summary>DI: 진공 압력 스위치 = 물건이 붙어 있음 (Boolean)</summary>
         public const string VacuumOk = Io + ".DI_VacuumOk";
+
+        /// <summary>DI: 팔레트 존재 센서 (Boolean). 가득 찬 팔레트를 빼고 빈 팔레트를 넣는 동안 false</summary>
+        public const string PalletPresent = Io + ".DI_PalletPresent";
     }
 
     /// <summary>운전 모드 (OPC 40010 OperationalModeEnumeration과 같은 값)</summary>

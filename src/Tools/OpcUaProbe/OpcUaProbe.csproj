@@ -13,6 +13,8 @@
   <ItemGroup>
     <ProjectReference Include="..\..\Shared\ConveyorTwin.Shared.csproj" />
     <PackageReference Include="OPCFoundation.NetStandard.Opc.Ua.Client" Version="1.5.378.182" />
+    <!-- watch 모드: 컨베이어 출구 센서(MQTT)와 로봇 신호(OPC UA)를 함께 기록 -->
+    <PackageReference Include="MQTTnet" Version="5.2.0.1603" />
   </ItemGroup>
 
 </Project>

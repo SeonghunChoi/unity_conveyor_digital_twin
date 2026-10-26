@@ -28,6 +28,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     Task? _robotTask;
 
     volatile ConveyorSnapshot? _snapshot;
+    volatile RobotStatus? _robot;
     volatile IReadOnlyCollection<string> _clients = Array.Empty<string>();
     volatile IReadOnlyCollection<string> _opcSessions = Array.Empty<string>();
 
@@ -58,6 +59,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     public string TempText { get => _temp; private set => Set(ref _temp, value); }
     public string CurrentText { get => _current; private set => Set(ref _current, value); }
     public string ItemsText { get => _items; private set => Set(ref _items, value); }
+
+    string _robotText = "-", _jointsText = "-";
+    public string RobotText { get => _robotText; private set => Set(ref _robotText, value); }
+    public string JointsText { get => _jointsText; private set => Set(ref _jointsText, value); }
 
     long _sentCount;
     public long SentCount { get => _sentCount; private set => Set(ref _sentCount, value); }
@@ -140,10 +145,11 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         _sim.Updated += s => _snapshot = s;
         _simTask = Task.Run(() => _sim.RunAsync(_cts.Token));
 
-        // 2단계: 로봇 OPC UA 서버 (4일 차에 가상 로봇 컨트롤러로 교체될 임시 로봇이 값을 채운다)
+        // 2단계: 로봇 OPC UA 서버 + 가상 로봇 컨트롤러 (출구에 멈춘 물건을 집어 팔레트에 적재)
         await _opcua.StartAsync();
         OpcUaStatus = "대기 중";
-        var robot = new RobotPlaceholder(_opcua);
+        var robot = new RobotController(_opcua, _sim);
+        robot.Updated += r => _robot = r;
         _robotTask = Task.Run(() => robot.RunAsync(_cts.Token));
     }
 
@@ -177,7 +183,13 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
             SpeedText = $"{s.SpeedMps:F3} m/s";
             TempText = $"{s.MotorTempC:F1} °C";
             CurrentText = $"{s.MotorCurrentA:F2} A";
-            ItemsText = $"벨트 위 {s.ItemsOnBelt} / 배출 {s.ItemsDelivered}" + (s.Jammed ? " (걸림)" : "");
+            ItemsText = $"벨트 위 {s.ItemsOnBelt} / 로봇 인계 {s.ItemsDelivered}" + (s.Jammed ? " (걸림)" : "");
+        }
+        if (_robot is { } r)
+        {
+            RobotText = $"{r.Phase} · 사이클 {r.CycleCount} · 팔레트 {(r.PalletPresent ? $"{r.NextSlot}/{RobotCell.SlotCount}" : "교체 중")}" +
+                        (r.LastCycleS > 0 ? $" · 직전 {r.LastCycleS:F1}s" : "");
+            JointsText = string.Join(" ", r.JointsDeg.Select(q => q.ToString("F0").PadLeft(5)));
         }
 
         if (_simTask is { IsFaulted: true })

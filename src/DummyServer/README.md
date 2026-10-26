@@ -22,7 +22,7 @@ dotnet run --project src/DummyServer
 | `MainViewModel.cs`, `MainWindow.xaml` | 상태 표시와 송신 로그 (100ms마다 일괄 반영, 최근 1000건) |
 | `OpcUa/RobotOpcUaServer.cs` | (2단계) 로봇 OPC UA 서버 `opc.tcp://127.0.0.1:4840`, 신뢰 목록 기반 보안, 트윈 인증서 발급(`CertificateProvisioning`) |
 | `OpcUa/RobotNodeManager.cs` | (2단계) OPC 40010 구조를 따른 로봇 주소 공간 (`Shared.RobotNodes`, [docs/robot-opcua.md](../../docs/robot-opcua.md)) |
-| `Simulation/RobotPlaceholder.cs` | (2단계 3일 차) 홈 자세만 내는 임시 로봇. 4일 차 가상 로봇 컨트롤러로 교체 |
+| `Simulation/RobotController.cs` | (2단계) 가상 로봇 컨트롤러: 출구 스토퍼의 물건을 집어 팔레트 48칸에 적재, 관절 공간 5차 보간 ([docs/robot-cell.md](../../docs/robot-cell.md)) |
 
 ### 왜 브로커에 "클라이언트로" 발행하나
 
@@ -37,7 +37,8 @@ dotnet run --project src/DummyServer
 | 벨트 속도 | 0.5 m/s ± 0.004 | |
 | 모터 전류 | 1.8 A + 벨트 위 하중 × 0.02 A/kg | 물건이 올라가면 전류가 오른다 (물건 걸림 장애에서 전류 상승의 근거) |
 | 모터 온도 | 25 °C에서 시작, 목표값 `25 + 12 × 전류`로 1차 지연(시정수 90 s) | 정상 상태 약 47~50 °C |
-| 물건 | 길이 0.3 m 박스, 2~15 kg, 2.5~5 s 간격 투입, 앞 물건과 0.4 m 이상 간격 | |
+| 물건 | 길이 0.3 m 박스, 2~15 kg, 6~8 s 간격 투입, 앞 물건과 0.4 m 이상 간격 | 2단계에서 로봇 사이클(약 4.5 s)보다 길게 늘림 (1단계 2.5~5 s) |
+| 출구 스토퍼 | 앞단이 출구 센서에 닿으면 멈춤 | 로봇이 집어 들 때 벨트에서 빠지고 출구 `blocked: false` (`RequestPick`) |
 | 센서 | 입구 = 0 m, 출구 = `Equipment.BeltLengthM`(1.95 m) | 앞단 도달 시 `blocked: true`, 뒷단 통과 시 `false` |
 
 물건 위치는 시간이 아니라 **속도를 적분**해서 구합니다. 속도가 0이 되면(모터 정지 장애) 물건도 그 자리에 멈춥니다.
