@@ -119,7 +119,7 @@ claude.ai에서 진행한 기획 대화의 결정 사항을 옮겨 왔습니다.
 | 3 | 서버 OPC UA 서버 골격, 로봇 정보 모델 (관절각, 모드, 프로그램 상태, 그리퍼, 사이클 수) | ✅ 완료 (40010 참고 단순화 모델, 서버 exe 인증서 발급, `docs/robot-opcua.md`) |
 | 4 | 서버 가상 로봇 컨트롤러: 관절 공간 보간, 출구 도착 → 픽 사이클, 팔레트 적재 패턴 | ✅ 완료 (출구 스토퍼, MoveJ식 5차 보간, 팔레트 교체 `DI_PalletPresent`, `docs/robot-cell.md`) |
 | 5 | 트윈 OPC UA 클라이언트: 구독, StatusCode·SourceTimestamp 검증, 재연결 | ✅ 완료 (`RobotOpcUaLink`·`RobotGate`, 인증서 자동 발급·재발급, 서버 재시작 감지 `docs/robot-opcua.md` 5절) |
-| 6 | 트윈 로봇 미러링, 물건 인계 (컨베이어 → 그리퍼 → 팔레트) | |
+| 6 | 트윈 로봇 미러링, 물건 인계 (컨베이어 → 그리퍼 → 팔레트) | ✅ 완료 (`RobotTwin`, 재생 시계 공유, 집기·놓기 오차 최대 3.9mm, 반송 방향 버그 수정 `docs/robot-cell.md`) |
 | 7 | 셀 장애 버튼 + 트윈 대응 (OPC UA 세션 끊김, 비상정지, 픽 실패 등) ★ | |
 | 8 | HMI·알람에 로봇 셀 통합 | |
 | 9 | 배포 빌드, 클린 PC 실행 테스트 | |
@@ -178,11 +178,14 @@ dotnet run --project src/DummyServer  # 더미 서버 실행 (브로커 127.0.0.
   로봇 glb가 있으면 `RobotCellBuilder`가 로봇·그리퍼·팔레트도 놓는다. 배치모드: `-executeMethod ConveyorTwin.EditorTools.TwinSceneSetup.SetupBatch`.
 - 로봇 OPC UA 연결 점검: `Tools/Twin/Check Robot OPC UA Link` (`RobotLinkCheck.CheckBatch -linkSeconds N [-freshPki]`) — 더미 서버 실행 중이어야 한다.
   트윈 코드는 `Twin/Assets/Scripts/Twin/OpcUa/` (`RobotOpcUaLink` 연결·발급·재접속, `RobotGate` 값 검사, `MonoTcpTransport`).
+- 플레이 점검: `Tools/Twin/Play Check` (`TwinPlayCheck.RunBatch -playSeconds N`, **-quit 없이**) — 플레이 모드에서 인계·오차·경고 측정, `dist/playcheck/*.png`.
 - 셀 점검: `Tools/Twin/Check Robot Cell` (`RobotCellCheck.CheckBatch`) — 픽 위치 실측 비교, 48칸 IK 도달·가동 범위, TCP 오차, `dist/cellcheck/*.png` 캡처.
 - Unity 점검: 메뉴 `Tools/CAD/Check Conveyor Import` (`Twin/Assets/Editor/CadImportCheck.cs`)가 서브메시·축·드럼 간 거리를 콘솔에 출력한다.
 - **Unity 좌표 (2026-10-20 확인)**: 1유닛 = 1m, 반송 방향 = Unity **+Z** (Drum_Tail z=-0.975 → Drum_Head z=+0.975),
   벨트 윗면 y≈0.850, 드럼 축 y=0.823. glTFast가 X를 반전하므로 구동부·제어 박스는 +X 쪽에 있다.
   드럼은 로컬 X축 기준으로 회전시키며, 벨트 속도 v일 때 각속도 = v / 0.0275 rad/s (벨트 감은 외경 기준).
+  **`Drum_Head` 노드는 구동축 때문에 축 방향(+X)으로 11.75mm 치우쳐 있다.** 벨트 중심선은 x = 0 (벨트 메시 대칭).
+  반송 방향은 드럼 중심을 잇지 말고 드럼 축에 수직인 방향으로 구한다 (`ConveyorTwinController.ResolveGeometry`).
 
 ## 알려진 사항
 

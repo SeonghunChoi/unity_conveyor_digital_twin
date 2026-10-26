@@ -1,5 +1,6 @@
 using ConveyorTwin.Twin;
 using ConveyorTwin.Twin.Hmi;
+using ConveyorTwin.Twin.Robot;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
@@ -46,7 +47,7 @@ namespace ConveyorTwin.EditorTools
             conveyor.name = "Conveyor";
 
             // 2단계 로봇 셀 (로봇 glb가 없으면 건너뛴다)
-            RobotCellBuilder.Build();
+            var cell = RobotCellBuilder.Build();
 
             // 상태 셰이더는 직접 참조해야 플레이어 빌드에 포함된다 (Shader.Find만으로는 빠질 수 있음)
             var statusShader = AssetDatabase.LoadAssetAtPath<Shader>(StatusShaderPath);
@@ -62,6 +63,16 @@ namespace ConveyorTwin.EditorTools
             so.FindProperty("conveyorRoot").objectReferenceValue = conveyor.transform;
             so.FindProperty("statusShader").objectReferenceValue = statusShader;
             so.ApplyModifiedPropertiesWithoutUndo();
+            // 2단계 로봇 미러: OPC UA 신호로 로봇을 그리고 컨베이어 박스를 그리퍼·팔레트로 넘긴다
+            if (cell != null)
+            {
+                var robotTwin = twin.AddComponent<RobotTwin>();
+                var rso = new SerializedObject(robotTwin);
+                rso.FindProperty("conveyor").objectReferenceValue = controller;
+                rso.FindProperty("robotRoot").objectReferenceValue = cell.transform.Find("Robot");
+                rso.FindProperty("pallet").objectReferenceValue = cell.transform.Find("Pallet");
+                rso.ApplyModifiedPropertiesWithoutUndo();
+            }
             var vso = new SerializedObject(visuals);
             vso.FindProperty("statusShader").objectReferenceValue = statusShader;
             vso.ApplyModifiedPropertiesWithoutUndo();

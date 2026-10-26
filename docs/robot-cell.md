@@ -98,6 +98,44 @@ OPC UA(로봇 신호)와 MQTT(출구 센서)를 같은 PC 시계로 함께 기�
 | 팔레트 교체 | 48번째 사이클 1.5s 뒤 `DI_PalletPresent` false → 3.8s 뒤 true, 이어서 49번째 사이클 정상 |
 | 교체 중 도착한 박스 | 출구에서 1.64s 대기 후 집힘 (기록 중 최대 대기). 뒤 박스 쌓임 없음 |
 
+## 트윈 미러링 (6일 차, `Twin/Assets/Scripts/Twin/Robot/RobotTwin.cs`)
+
+![트윈 플레이 화면](images/robot-cell-twin.png)
+
+- **같은 재생 시계**: 관절각·IO 신호를 SourceTimestamp로 버퍼에 쌓고, 컨베이어와 같은 재생 시계(`ConveyorTwinController.PlaybackMs`,
+  현재 − 기준 지연 − 300ms)로 재생한다. MQTT `ts`와 OPC UA SourceTimestamp는 같은 서버 시계라 두 프로토콜의 사건이 한 줄로 맞물린다.
+- **관절각**: 재생 시각 앞뒤 샘플을 선형 보간해 `localRotation = AngleAxis(θ, 축)`. 값은 바뀔 때만 오므로 마지막 샘플 이후는 그 자세 유지가 곧 현실이다.
+- **인계 (신호 조합 추론)**: 압력 스위치 ON → 출구 스토퍼의 박스를 TCP에 붙임. 출구 해제(MQTT)와 같은 틱이라 처리 순서가 바뀔 수 있어
+  두 경로를 모두 받는다 — 출구 해제가 먼저면 `ItemTracker.ExitHandoff`로 박스를 1초 보관했다가 넘기고,
+  압력 스위치가 먼저면 `ItemTracker.ClaimAtExit`로 출구의 박스를 먼저 가져간 뒤 뒤따르는 출구 해제를 조용히 넘긴다.
+  압력 스위치 OFF → 그 자리에 둔다 (칸 계산 없음). 팔레트 센서 OFF → 쌓인 박스와 팔레트를 숨기고, ON이면 빈 팔레트.
+- **출구 대기 중 잼 보류**: 출구 센서가 막혀 있으면 뒤 박스는 출구에 닿을 수 없으므로 잼 판단용 이동 거리를 쌓지 않는다 (`ItemTracker.Tick`).
+- **서버 재시작**: `RobotGate`가 StartTime 변경을 알리면 그리퍼·팔레트 박스와 대기 샘플을 비운다.
+
+### 반송 방향 버그 수정 (1단계부터 있던 것)
+
+트윈은 반송 방향을 "두 드럼 중심을 잇는 선"으로 잡았는데, `Drum_Head` 노드는 구동축까지 포함한 바운딩 박스 중심이라
+축 방향(Unity +X)으로 11.75mm 치우쳐 있었다 (벨트 메시는 x ±0.145로 대칭). 그래서 박스 경로가 0.35° 비스듬했고,
+출구에서 박스 중심이 벨트 중심선보다 10.8mm 옆에 있었다. 플레이 점검의 집기 오차를 x·y·z로 나눠 보고 찾았다.
+반송 방향을 **수평면에서 드럼 축에 수직인 방향**으로 바꿔 축 방향 치우침을 뺐다 (드럼 회전에는 영향 없음).
+셀 점검(`RobotCellCheck`)도 픽 위치의 x를 벨트 메시 중심과 비교하고 허용치를 1cm → 2mm로 줄였다 — 2일 차 점검은 x를 0으로 가정해 이 어긋남을 놓쳤다.
+
+### 플레이 점검 (`Tools/Twin/Play Check`, `Twin/Assets/Editor/TwinPlayCheck.cs`)
+
+배치모드에서 실제 플레이 모드로 트윈을 돌리며 인계를 측정한다 (더미 서버가 없으면 트윈의 ServerLauncher가 띄운다).
+
+```bash
+Unity.exe -batchmode -projectPath Twin -executeMethod ConveyorTwin.EditorTools.TwinPlayCheck.RunBatch -playSeconds 60 -logFile play.log   # -quit 없이
+```
+
+| 항목 (2026-10-26, 60초) | 결과 |
+| --- | --- |
+| 로봇 OPC UA | 접속 유지, 검증 통과 1,883 / 거부 0 |
+| 집기·놓기 | 10회·10회, 경고 0 (팔레트 교체 1회 포함), 잼 0 |
+| 집기 오차 (박스 윗면 ↔ TCP) | 평균 2.2mm, 최대 3.9mm — x 0.0, 나머지는 입구 센서로 추정한 박스 길이 오차(0.297~0.308m)의 절반 |
+| 놓기 오차 (박스 ↔ 칸 중심) | 평균 2.7mm, 최대 3.9mm |
+| 수정 전 | 집기 오차 평균 9.9mm (x 10.8mm 고정) |
+
 ## 남은 것
 
 - 펜스·안전 영역은 1단계처럼 범위 밖으로 둔다.

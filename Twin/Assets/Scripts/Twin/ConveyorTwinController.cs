@@ -143,6 +143,10 @@ namespace ConveyorTwin.Twin
         public SignalValue Current { get; } = new SignalValue(Signals.MotorCurrent);
         public SignalValue Weight { get; } = new SignalValue(Signals.LoadWeight);
         public ItemTracker Tracker => _tracker;
+        /// <summary>재생 시각 (서버 시각, Unix ms). 로봇 미러(RobotTwin)도 이 시계로 관절각을 재생한다. 0이면 아직 시작 전</summary>
+        public double PlaybackMs => _playbackMs;
+        /// <summary>박스 머티리얼 (로봇이 든 박스·팔레트 위 박스도 같은 모양)</summary>
+        public Material BoxMaterial => _boxMaterial;
         /// <summary>네트워크 지연: 마지막 메시지의 수신 시각 - ts</summary>
         public long LastLatencyMs { get; private set; }
         public long Received { get; private set; }
@@ -216,8 +220,16 @@ namespace ConveyorTwin.Twin
             _drumHeadBase = _drumHead.rotation;
             _drumTailBase = _drumTail.rotation;
 
+            // 반송 방향 = 수평면에서 드럼 축에 수직인 방향 (드럼 노드의 로컬 X가 축).
+            // 두 드럼 중심을 그냥 이으면 안 된다: 구동 드럼 노드는 구동축까지 포함한 바운딩 박스 중심이라
+            // 축 방향(Unity +X)으로 11.75mm 치우쳐 있어, 박스 경로가 벨트 중심선에서 비스듬해진다 (2단계 6일 차에 발견).
+            // 축 방향 치우침은 드럼 회전에는 영향이 없으므로 여기서만 빼면 된다.
+            var axis = _drumTail.rotation * Vector3.right;
+            axis.y = 0f;
+            axis.Normalize();
             var span = _drumHead.position - _drumTail.position;
             span.y = 0f;
+            span -= axis * Vector3.Dot(span, axis);
             _entryPoint = _drumTail.position;
             _flowDir = span.normalized;
             _beltTopY = _drumTail.position.y + BeltOuterRadiusM;

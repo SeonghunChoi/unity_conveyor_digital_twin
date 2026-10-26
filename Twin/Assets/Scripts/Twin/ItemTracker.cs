@@ -33,6 +33,12 @@ namespace ConveyorTwin.Twin
     ///   단 그 물건이 출구까지 올 만큼(벨트 길이의 75%) 이동하지 않았다면 짝짓지 않는다 (트윈이 보지 못한 물건)
     /// - 출구 해제(false): 물건이 벨트를 떠남
     ///
+    /// 2단계 (출구 스토퍼 + 로봇):
+    /// - 출구 감지된 물건은 스토퍼에 멈춰 있다 (앞단이 출구 센서를 넘지 않음). 출구 해제는 로봇이 집어 들 때 온다
+    /// - 출구가 막혀 있는 동안 뒤 물건은 출구에 닿을 수 없으므로 잼 판단용 이동 거리를 쌓지 않는다 (쌓여 기다리는 것은 잼이 아님)
+    /// - 로봇 인계: 출구 해제 때 <see cref="ExitHandoff"/>가 물건을 받아 가면 박스를 지우지 않고 넘긴다.
+    ///   압력 스위치가 출구 해제보다 먼저 처리되면 <see cref="ClaimAtExit"/>로 출구의 물건을 먼저 가져가고, 뒤따르는 출구 해제는 조용히 넘긴다
+    ///
     /// 잼 판단 (docs/protocol.md 4절): 입구 이후 벨트가 움직인 거리가 벨트 길이 × 1.5를 넘었는데
     /// 출구 감지가 없으면 잼. 속도가 일정하면 "벨트 길이 / 속도 × 1.5초"와 같고, 모터 정지 시간은 빠진다.
     /// 시간 축은 컨트롤러의 재생 시계(서버 시각)다. 전송 지연이나 끊김으로 데이터가 없으면 재생이 멈추므로
@@ -56,6 +62,7 @@ namespace ConveyorTwin.Twin
 
         TrackedItem _entering;     // 입구 센서를 가리고 있는 물건
         bool _untrackedAtExit;     // 출구 센서를 가리고 있는 것이 추적 밖 물건
+        bool _claimedAtExit;       // 출구의 물건을 로봇이 먼저 가져감 (출구 해제 엣지가 아직 안 옴)
         int _nextId = 1;
         /// <summary>
         /// 재동기화 중 남은 거리. 트윈 시작·연결 복구 직후에는 트윈이 보지 못한 입구 감지로 들어온 물건이
@@ -75,6 +82,30 @@ namespace ConveyorTwin.Twin
         public event Action<string> Warning;
         public event Action<TrackedItem> JamDetected;
         public event Action<TrackedItem> JamCleared;
+
+        /// <summary>
+        /// 출구 해제로 벨트를 떠나는 물건을 넘겨받는 곳 (로봇 미러). true를 돌려주면 박스(View)의 소유가 넘어가 지우지 않는다.
+        /// 없거나 false면 1단계처럼 박스를 지운다.
+        /// </summary>
+        public Func<TrackedItem, bool> ExitHandoff;
+
+        /// <summary>출구 센서가 막혀 있다 (스토퍼에 물건이 기다림)</summary>
+        public bool ExitOccupied => _untrackedAtExit || _items.Exists(i => i.AtExit);
+
+        /// <summary>
+        /// 출구에 멈춘 물건을 출구 해제 엣지보다 먼저 가져간다 (로봇 압력 스위치가 먼저 처리된 경우).
+        /// 박스(View)의 소유가 넘어가며, 뒤따르는 출구 해제 엣지는 경고 없이 넘긴다. 출구에 추적 중인 물건이 없으면 null
+        /// </summary>
+        public TrackedItem ClaimAtExit()
+        {
+            var item = _items.Find(i => i.AtExit);
+            if (item == null) return null;
+            _items.Remove(item);
+            if (_entering == item) _entering = null;
+            _claimedAtExit = true;
+            Exited++;
+            return item;
+        }
 
         public ItemTracker(Func<TrackedItem, GameObject> createView)
         {
@@ -168,10 +199,14 @@ namespace ConveyorTwin.Twin
                 var item = _items.Find(i => i.AtExit);
                 if (item == null)
                 {
+                    if (_claimedAtExit) { _claimedAtExit = false; return; }   // 로봇이 이미 가져간 물건
                     if (!Resyncing) Warning?.Invoke("출구 해제 엣지인데 출구에 물건이 없습니다");
                     return;
                 }
-                Remove(item);
+                _items.Remove(item);
+                if (_entering == item) _entering = null;
+                if (ExitHandoff == null || !ExitHandoff(item))
+                    DestroyView(item);
                 Exited++;
             }
         }
@@ -183,19 +218,21 @@ namespace ConveyorTwin.Twin
         public void Tick(double dt, double speed)
         {
             double move = speed * dt;
+            bool exitOccupied = ExitOccupied;
             for (int i = 0; i < _items.Count; i++)
             {
                 var item = _items[i];
                 double next = item.FrontM + move;
-                // 출구 감지 전에는 출구 센서를 넘어가지 않는다
-                if (!item.AtExit)
-                    next = Math.Min(next, Equipment.BeltLengthM);
+                // 출구 센서를 넘어가지 않는다: 감지 전에는 확인되지 않은 이동이고, 감지 후에는 스토퍼에 멈춰 있다 (2단계)
+                next = Math.Min(next, Equipment.BeltLengthM);
                 // 앞 물건을 추월하지 않는다
                 if (i > 0)
                     next = Math.Min(next, _items[i - 1].FrontM - _items[i - 1].LengthM);
                 item.FrontM = Math.Max(item.FrontM, next);
 
-                item.TravelM += move;
+                // 출구가 막혀 있으면 뒤 물건은 출구에 닿을 수 없다 → 기다리는 시간은 잼 판단에서 뺀다
+                if (!exitOccupied || item.AtExit)
+                    item.TravelM += move;
                 if (!item.AtExit && !item.Jammed && item.TravelM > Equipment.BeltLengthM * Equipment.JamTimeFactor)
                 {
                     item.Jammed = true;
@@ -224,6 +261,7 @@ namespace ConveyorTwin.Twin
             _items.Clear();
             _entering = null;
             _untrackedAtExit = false;
+            _claimedAtExit = false;
         }
 
         void Remove(TrackedItem item)

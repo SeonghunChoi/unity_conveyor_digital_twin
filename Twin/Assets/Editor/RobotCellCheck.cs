@@ -70,10 +70,13 @@ namespace ConveyorTwin.EditorTools
             {
                 float beltTop = belt.GetComponentInChildren<Renderer>().bounds.max.y;
                 // 출구 센서 = 구동 드럼 중심. 앞단이 닿아 멈춘 박스의 윗면 중심
-                var expected = new Vector3(0f, beltTop + (float)RobotCell.BoxHeightM, head.position.z - (float)RobotCell.BoxLengthM / 2);
+                // 박스는 벨트 중심선 위에 있다 — x까지 비교해야 로봇 배치의 좌우 어긋남이 드러난다.
+                // 중심선은 벨트 메시의 x 중심 (구동 드럼 노드는 구동축 때문에 축 방향으로 치우쳐 있어 기준으로 쓰지 않는다)
+                float beltCenterX = belt.GetComponentInChildren<Renderer>().bounds.center.x;
+                var expected = new Vector3(beltCenterX, beltTop + (float)RobotCell.BoxHeightM, head.position.z - (float)RobotCell.BoxLengthM / 2);
                 var pick = RobotCellBuilder.CellToWorld(RobotCell.PickTop);
                 float err = (pick - expected).magnitude;
-                bool pass = err < 0.01f;
+                bool pass = err < 0.002f;
                 ok &= pass;
                 sb.AppendLine($"  픽 위치 {pick:F3} / 컨베이어 실측 {expected:F3}  {(pass ? "OK" : $"불일치 {err:F3}m")}  (벨트 윗면 y={beltTop:F3})");
             }
