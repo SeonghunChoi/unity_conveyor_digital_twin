@@ -59,6 +59,19 @@ namespace ConveyorTwin.Twin
             if (_rate > CatchUpShowRate)
                 Line($"         <color=#6cf><b>▶▶ 따라잡는 중 ×{_rate:F1}</b></color> (밀린 구간을 빨리 재생: 화면 속도가 실제 설비 속도보다 빠름)");
 
+            // 로봇 셀 (2단계): OPC UA 링크와 RobotGate 검증 통계
+            var robot = GetComponent<Robot.RobotTwin>();
+            if (robot != null)
+            {
+                var g = robot.Gate;
+                Line($"로봇     OPC UA {robot.LinkState}{(robot.LinkError != null ? $" ({robot.LinkError})" : "")}, 서버 시작 {g.ServerStartUtc.ToLocalTime():HH:mm:ss}");
+                Line($"         검증 통과 {g.Accepted}, Bad {g.RejectedBad}, 과거 {g.RejectedOld}, 미래 {g.RejectedFuture}, 범위 밖 {g.RejectedRange}, " +
+                     $"Uncertain {g.Uncertain}, 중복 {g.Duplicates}, 관절 지연 {robot.LastJointLatencyMs} ms");
+                Line($"         집기 {robot.GripCount}회, 마지막 맞추기 전 오차 {robot.LastGripOffsetM * 1000:F1} mm{(robot.LastGripDuringBadData ? " (믿을 수 없는 구간)" : "")}");
+                foreach (var w in robot.Warnings)
+                    Line($"<color=#fc6>{w}</color>");
+            }
+
             var alarms = _twin.Alarms;
             Line(alarms.ActiveCount == 0
                 ? "<b>알람     <color=#7f7>없음</color></b>"

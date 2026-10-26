@@ -5,6 +5,10 @@
 
 ![비상정지 중 트윈](images/robot-fault-estop.png)
 
+HMI에서는 알람 목록·가운데 배너·로봇 셀 카드로 보인다 (8일 차, [Twin/README.md](../Twin/README.md) HMI 절):
+
+![흡착 실패 중 HMI](images/hmi-robot-vacuum.png)
+
 ## 장애 버튼과 대응
 
 | 서버 버튼 | 서버(현실)가 하는 일 | 트윈이 받는 원시 신호 | 트윈의 판단·대응 |

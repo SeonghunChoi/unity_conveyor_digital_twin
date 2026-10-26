@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  컨베이어 트윈 HMI. 가운데는 비워 3D 트윈이 보이게 하고, 좌우에 값·알람을 둔다.
+  컨베이어 + 로봇 셀 트윈 HMI (2단계 8일 차에 로봇 셀 통합). 가운데는 비워 3D 트윈이 보이게 하고, 좌우에 값·알람을 둔다.
   ISA-101 (고성능 HMI) 원칙: 정상 상태는 회색 계열, 색은 이상 상태에만 쓴다.
   값은 TwinHmi.cs가 이름(name)으로 찾아 채운다.
 -->
@@ -11,12 +11,13 @@
         <!-- 상단: 설비 이름, 연결 상태, 시계 -->
         <ui:VisualElement class="topbar">
             <ui:VisualElement class="title-block">
-                <ui:Label text="Conveyor01" class="title" />
-                <ui:Label text="벨트 컨베이어 디지털 트윈 · mk GUF-P 2000" class="subtitle" />
+                <ui:Label text="Cell01 · 컨베이어 + 로봇 셀" class="title" />
+                <ui:Label text="mk GUF-P 2000 (MQTT) · ABB IRB 2600 (OPC UA)" class="subtitle" />
             </ui:VisualElement>
             <ui:VisualElement class="chips">
                 <ui:VisualElement name="chip-broker" class="chip"><ui:Label text="브로커" class="chip-label" /><ui:Label name="chip-broker-value" text="-" class="chip-value" /></ui:VisualElement>
-                <ui:VisualElement name="chip-device" class="chip"><ui:Label text="설비" class="chip-label" /><ui:Label name="chip-device-value" text="-" class="chip-value" /></ui:VisualElement>
+                <ui:VisualElement name="chip-device" class="chip"><ui:Label text="컨베이어" class="chip-label" /><ui:Label name="chip-device-value" text="-" class="chip-value" /></ui:VisualElement>
+                <ui:VisualElement name="chip-robot" class="chip"><ui:Label text="로봇 OPC UA" class="chip-label" /><ui:Label name="chip-robot-value" text="-" class="chip-value" /></ui:VisualElement>
                 <ui:VisualElement name="chip-server" class="chip chip-with-action">
                     <ui:VisualElement><ui:Label text="서버" class="chip-label" /><ui:Label name="chip-server-value" text="-" class="chip-value" /></ui:VisualElement>
                     <ui:Button name="btn-launch" text="실행" class="btn btn-small hidden" />
@@ -96,6 +97,27 @@
                         <ui:VisualElement class="stat"><ui:Label text="최근 무게" class="stat-label" /><ui:Label name="stat-weight" text="-" class="stat-value small" /></ui:VisualElement>
                     </ui:VisualElement>
                     <ui:Label name="stat-note" text=" " class="muted" />
+                </ui:VisualElement>
+
+                <!-- 로봇 셀: 모두 OPC UA 원시 신호 (판단은 알람 목록이 한다) -->
+                <ui:VisualElement name="card-robot" class="card robot-card">
+                    <ui:VisualElement class="kpi-head">
+                        <ui:Label text="로봇 셀 · IRB 2600" class="card-title" />
+                        <ui:Label name="robot-meta" text="-" class="kpi-meta" />
+                    </ui:VisualElement>
+                    <ui:Label name="robot-state" text="-" class="robot-state" />
+                    <ui:VisualElement class="stat-grid">
+                        <ui:VisualElement class="stat stat-third"><ui:Label text="사이클" class="stat-label" /><ui:Label name="robot-cycles" text="-" class="stat-value small" /></ui:VisualElement>
+                        <ui:VisualElement class="stat stat-third"><ui:Label text="팔레트 (표시/48)" class="stat-label" /><ui:Label name="robot-pallet" text="-" class="stat-value small" /></ui:VisualElement>
+                        <ui:VisualElement class="stat stat-third"><ui:Label text="출구 대기" class="stat-label" /><ui:Label name="robot-exitwait" text="-" class="stat-value small" /></ui:VisualElement>
+                    </ui:VisualElement>
+                    <ui:VisualElement class="io-row">
+                        <ui:Label name="io-vacuum-on" text="진공 출력" class="io" />
+                        <ui:Label name="io-vacuum-ok" text="압력 스위치" class="io" />
+                        <ui:Label name="io-motors" text="모터" class="io" />
+                        <ui:Label name="io-pallet" text="팔레트" class="io" />
+                    </ui:VisualElement>
+                    <ui:VisualElement name="joint-list" class="joint-list" />
                 </ui:VisualElement>
 
                 <ui:VisualElement name="card-alarms" class="card alarms">

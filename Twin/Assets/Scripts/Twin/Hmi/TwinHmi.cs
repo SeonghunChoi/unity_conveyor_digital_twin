@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using ConveyorTwin.Shared;
+using ConveyorTwin.Twin.OpcUa;
+using ConveyorTwin.Twin.Robot;
 using UnityEngine;
 using UnityEngine.TextCore.Text;
 using UnityEngine.UIElements;
@@ -16,6 +18,10 @@ namespace ConveyorTwin.Twin.Hmi
     /// - 값이 믿을 수 없는 상태(stale, 오프라인, 화면 지연)는 값 옆과 상단 칩, 가운데 배너로 분명히 알린다
     ///
     /// 개발용 텍스트 HUD(TwinHud)는 기본으로 숨기고 "진단" 버튼으로 켠다.
+    ///
+    /// 2단계 8일 차: 로봇 셀(OPC UA)을 같은 화면에 합쳤다 — 상단 "로봇 OPC UA" 칩, 오른쪽 "로봇 셀" 카드(상태·사이클·팔레트·IO·관절 6개),
+    /// 가운데 배너. 알람은 컨베이어와 한 목록이다 (RobotTwin이 ConveyorTwinController.AppendConditions로 더함).
+    /// 카드에는 원시 신호만 보이고, "흡착 실패" 같은 판단은 알람 목록이 보인다.
     /// </summary>
     [RequireComponent(typeof(UIDocument))]
     public sealed class TwinHmi : MonoBehaviour
@@ -23,13 +29,17 @@ namespace ConveyorTwin.Twin.Hmi
         [SerializeField] ConveyorTwinController twin;
         [SerializeField] ServerLauncher launcher;
         [SerializeField] TwinHud diagnosticHud;
+        /// <summary>로봇 미러 (로봇 glb가 없어 셀이 없으면 null → 로봇 카드·칩을 숨김)</summary>
+        [SerializeField] RobotTwin robot;
 
         /// <summary>한글 글리프 폰트 (OS 맑은 고딕을 동적으로 쓰는 에셋, Setup Scene이 만들어 지정)</summary>
         [SerializeField] FontAsset koreanFont;
 
         const float RefreshS = 0.25f;           // 화면 갱신 주기
         const int TrendSamples = 240;           // 60초 / 0.25초
-        const int MaxAlarmRows = 9;
+        const int MaxAlarmRows = 5;   // 로봇 카드가 들어가며 9 → 5 (오른쪽 열 높이)
+        /// <summary>관절이 가동 범위 끝에서 이만큼 안쪽이면 막대를 경고색으로</summary>
+        const double JointNearLimitDeg = 10.0;
         const double ThroughputWindowS = 60.0;
 
         // ---- 표시 범위와 정상 운전 범위 (docs/protocol.md 7절) ----
@@ -60,6 +70,14 @@ namespace ConveyorTwin.Twin.Hmi
         Button _btnAck, _btnDiag, _btnLaunch, _btnDialogLaunch, _btnDialogLater;
         VisualElement _dialog;
         Label _dialogBody;
+
+        // ---- 로봇 셀 ----
+        VisualElement _robotCard, _chipRobot;
+        Label _robotChip, _robotState, _robotMeta, _robotCycles, _robotPallet, _robotExitWait;
+        Label _ioVacuumOn, _ioVacuumOk, _ioMotors, _ioPallet;
+        readonly VisualElement[] _jointRows = new VisualElement[6];
+        readonly VisualElement[] _jointFills = new VisualElement[6];
+        readonly Label[] _jointValues = new Label[6];
 
         // ---- 서버 연결 불가 다이얼로그 ----
         /// <summary>브로커가 이만큼 끊겨 있고 서버 프로세스도 없으면 묻는다</summary>
@@ -122,7 +140,58 @@ namespace ConveyorTwin.Twin.Hmi
                 _dialog.AddToClassList("hidden");
             };
             if (diagnosticHud != null) diagnosticHud.enabled = false;
+            BindRobot();
         }
+
+        void BindRobot()
+        {
+            _robotCard = Q<VisualElement>("card-robot");
+            _chipRobot = Q<VisualElement>("chip-robot");
+            _robotChip = Q<Label>("chip-robot-value");
+            _robotState = Q<Label>("robot-state");
+            _robotMeta = Q<Label>("robot-meta");
+            _robotCycles = Q<Label>("robot-cycles");
+            _robotPallet = Q<Label>("robot-pallet");
+            _robotExitWait = Q<Label>("robot-exitwait");
+            _ioVacuumOn = Q<Label>("io-vacuum-on");
+            _ioVacuumOk = Q<Label>("io-vacuum-ok");
+            _ioMotors = Q<Label>("io-motors");
+            _ioPallet = Q<Label>("io-pallet");
+            _robotCard.style.display = robot != null ? DisplayStyle.Flex : DisplayStyle.None;
+            _chipRobot.style.display = robot != null ? DisplayStyle.Flex : DisplayStyle.None;
+
+            // 관절 6개: 가동 범위(RobotKinematics) 안의 위치를 막대로, 0° 표시선
+            var list = Q<VisualElement>("joint-list");
+            list.Clear();
+            for (int i = 0; i < 6; i++)
+            {
+                var row = new VisualElement();
+                row.AddToClassList("joint-row");
+                var name = new Label("J" + (i + 1));
+                name.AddToClassList("joint-name");
+                var bar = new VisualElement();
+                bar.AddToClassList("joint-bar");
+                var zero = new VisualElement();
+                zero.AddToClassList("joint-zero");
+                zero.style.left = Length.Percent((float)JointPercent(i, 0));
+                var fill = new VisualElement();
+                fill.AddToClassList("joint-fill");
+                bar.Add(zero);
+                bar.Add(fill);
+                var value = new Label("-");
+                value.AddToClassList("joint-value");
+                row.Add(name);
+                row.Add(bar);
+                row.Add(value);
+                list.Add(row);
+                _jointRows[i] = row;
+                _jointFills[i] = fill;
+                _jointValues[i] = value;
+            }
+        }
+
+        static double JointPercent(int i, double deg) =>
+            (deg - RobotKinematics.MinDeg[i]) / (RobotKinematics.MaxDeg[i] - RobotKinematics.MinDeg[i]) * 100.0;
 
         /// <summary>
         /// 플레이 모드를 끝낼 때: 패널의 폰트 지정을 기본값으로 되돌린다.
@@ -202,6 +271,7 @@ namespace ConveyorTwin.Twin.Hmi
             UpdateKpi(_temp, twin.Temp, "F1", now, blind, Severity(twin.Temp.Value, 60.0, ConveyorTwinController.TempHighC));
             UpdateKpi(_current, twin.Current, "F2", now, blind, Severity(twin.Current.Value, CurrentRange.NormalHi, ConveyorTwinController.CurrentHighA));
             UpdateItems();
+            UpdateRobot();
             UpdateAlarms(now);
             UpdateBanner(now);
             UpdateServerRecovery();
@@ -280,6 +350,18 @@ namespace ConveyorTwin.Twin.Hmi
                 case ServerLauncher.LaunchState.NotFound: SetChip(_chipServer, _serverChip, "실행 파일 없음", twin.BrokerConnected ? 0 : 2); break;
                 case ServerLauncher.LaunchState.Failed: SetChip(_chipServer, _serverChip, "실행 실패", 2); break;
                 default: SetChip(_chipServer, _serverChip, "자동 실행 꺼짐", 0); break;
+            }
+
+            if (robot != null)
+            {
+                switch (robot.LinkState)
+                {
+                    case RobotLinkState.Connected: SetChip(_chipRobot, _robotChip, $"Basic256Sha256 · {Math.Max(0, robot.LastJointLatencyMs)}ms", 0); break;
+                    case RobotLinkState.Provisioning: SetChip(_chipRobot, _robotChip, "인증서 발급 중", 1); break;
+                    case RobotLinkState.Failed: SetChip(_chipRobot, _robotChip, "연결 불가 · 인증서", 2); break;
+                    case RobotLinkState.Reconnecting: SetChip(_chipRobot, _robotChip, "끊김 · 재접속 중", 2); break;
+                    default: SetChip(_chipRobot, _robotChip, "접속 중", 1); break;
+                }
             }
 
             long delay = twin.ScreenDelayMs;
@@ -370,6 +452,66 @@ namespace ConveyorTwin.Twin.Hmi
                 $"출구 위치 보정 {tr.LastCorrectionM * 1000:F0} mm";
         }
 
+        // ---------- 로봇 셀 ----------
+        void UpdateRobot()
+        {
+            if (robot == null) return;
+            bool connected = robot.LinkState == RobotLinkState.Connected;
+
+            // 상태 한 줄: 원시 신호를 그대로 읽은 것 (정지 원인 판단은 알람 목록)
+            string state;
+            int level = 0;
+            if (!connected) { state = "확인 불가 · 마지막 수신 자세"; level = 2; }
+            else if (robot.EmergencyStop) { state = "비상정지"; level = 2; }
+            else if (robot.ProtectiveStop) { state = "보호정지"; level = 2; }
+            else if (robot.VacuumFault) { state = "흡착 실패 · 픽 위치 대기"; level = 2; }
+            else if (!robot.MotorsOn) { state = "모터 OFF"; level = 1; }
+            else if (robot.Execution == ProgramExecutionState.Stopped) { state = "프로그램 정지"; level = 1; }
+            else state = "자동 운전 중";
+            _robotState.text = state;
+            _robotMeta.text = $"{ModeText(robot.Mode)} · 속도 {robot.SpeedOverride:F0}%";
+            _robotCard.EnableInClassList("warn", level == 1);
+            _robotCard.EnableInClassList("bad", level == 2);
+            _robotCard.EnableInClassList("stale", !connected || robot.JointDataBad);
+
+            _robotCycles.text = robot.CycleCount.ToString();
+            _robotPallet.text = robot.PalletPresent ? $"{robot.BoxesOnPallet} / {RobotCell.SlotCount}" : "교체 중";
+            double wait = robot.ExitWaitS;
+            _robotExitWait.text = wait > 0 ? $"{wait:F1}s" : "-";
+
+            SetIo(_ioVacuumOn, robot.VacuumOn, false);
+            SetIo(_ioVacuumOk, robot.VacuumOk, robot.VacuumFault);   // 흡착 실패는 압력 스위치 쪽에 표시
+            SetIo(_ioMotors, robot.MotorsOn, connected && robot.EmergencyStop);
+            SetIo(_ioPallet, robot.PalletPresent, false);
+
+            for (int i = 0; i < 6; i++)
+            {
+                double q = robot.JointsDeg[i];
+                _jointFills[i].style.left = Length.Percent(Mathf.Clamp((float)JointPercent(i, q), 0f, 99f));
+                _jointValues[i].text = $"{q:F1}°";
+                bool near = q - RobotKinematics.MinDeg[i] < JointNearLimitDeg || RobotKinematics.MaxDeg[i] - q < JointNearLimitDeg;
+                _jointRows[i].EnableInClassList("warn", near);
+            }
+        }
+
+        static void SetIo(Label io, bool on, bool bad)
+        {
+            io.EnableInClassList("on", on && !bad);
+            io.EnableInClassList("bad", bad);
+        }
+
+        static string ModeText(OperationalMode m)
+        {
+            switch (m)
+            {
+                case OperationalMode.Automatic: return "자동";
+                case OperationalMode.AutomaticExternal: return "자동(외부)";
+                case OperationalMode.ManualReducedSpeed: return "수동 감속";
+                case OperationalMode.ManualHighSpeed: return "수동 고속";
+                default: return "-";
+            }
+        }
+
         // ---------- 알람 ----------
         void UpdateAlarms(long now)
         {
@@ -429,6 +571,11 @@ namespace ConveyorTwin.Twin.Hmi
             }
             else if (twin.JammedCount > 0) { text = $"잼 감지 · 출구 미감지 물건 {twin.JammedCount}개"; level = "bad"; }
             else if (twin.RunState == RunState.Fault) { text = $"모터 고장 정지 · {twin.RunReason}"; level = "bad"; }
+            // 로봇 셀 (2단계): 컨베이어 문제가 없을 때 로봇 상태를 알린다
+            else if (robot != null && robot.LinkState == RobotLinkState.Reconnecting) { text = "로봇 OPC UA 통신 끊김 · 로봇은 마지막 수신 자세 (회색)"; level = "bad"; }
+            else if (robot != null && robot.EmergencyStop) { text = "로봇 비상정지 · 모터 전원 차단"; level = "bad"; }
+            else if (robot != null && robot.VacuumFault) { text = "로봇 흡착 실패 · 진공 출력 ON, 압력 스위치 OFF"; level = "bad"; }
+            else if (robot != null && robot.JointDataBad) { text = "로봇 관절각 측정 이상 (StatusCode Bad) · 마지막 정상 자세"; level = "warn"; }
             else if (_rate > 1.1) { text = $"▶▶ 밀린 구간을 빨리 재생 중 ×{_rate:F1} (화면 속도가 실제보다 빠름)"; level = "info"; }
             else if (twin.ScreenDelayMs > 1000) { text = $"화면은 {twin.ScreenDelayMs / 1000.0:F1}초 전 상태 · 전송 지연"; level = "warn"; }
 

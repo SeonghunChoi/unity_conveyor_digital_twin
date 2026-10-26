@@ -100,6 +100,8 @@ namespace ConveyorTwin.EditorTools
         static readonly HashSet<string> ActiveAlarms = new HashSet<string>();
         static readonly HashSet<string> Captured = new HashSet<string>();
         static double _startedAt = -1;
+        static double _connectedAt = -1;
+        static bool _normalShot;
         static bool _announced;
 
         /// <summary>알람 키가 켜지고 꺼지는 순간을 기록 (장애 시나리오 검증용). 로봇 알람이 처음 뜨면 화면도 캡처</summary>
@@ -111,7 +113,8 @@ namespace ConveyorTwin.EditorTools
             {
                 var text = conveyor.Alarms.History.First(a => a.Active && a.Key == k).Text;
                 Logs.Add($"{t,6:F1}s  + {k}: {text}");
-                if (k.StartsWith("robot_") && Captured.Add(k)) Capture("alarm_" + k);
+                // 로봇이 한 번 접속한 뒤의 로봇 알람만 (시작 직후 접속 전 robot_link는 제외)
+                if (k.StartsWith("robot_") && _announced && Captured.Add(k)) CaptureHmi("alarm_" + k);
             }
             foreach (var k in ActiveAlarms.Except(now))
                 Logs.Add($"{t,6:F1}s  - {k}");
@@ -128,8 +131,15 @@ namespace ConveyorTwin.EditorTools
                 // 외부 장애 조율 스크립트가 이 줄을 보고 시점을 맞춘다
                 Debug.Log("[PlayState] robot connected");
                 Logs.Add($"{EditorApplication.timeSinceStartup - _startedAt,6:F1}s  로봇 접속");
+                _connectedAt = EditorApplication.timeSinceStartup;
             }
             TrackAlarms(conveyor);
+            if (_announced && !_normalShot && EditorApplication.timeSinceStartup - _connectedAt > 4.0)
+            {
+                _normalShot = true;
+                CaptureHmi("normal");   // 장애 없는 정상 운전 화면
+            }
+            PumpHmiCapture();
 
             if (robot.CycleCount > 0)
             {
@@ -163,6 +173,14 @@ namespace ConveyorTwin.EditorTools
         static void Finish(RobotTwin robot, ConveyorTwinController conveyor)
         {
             SessionState.EraseString(KeyEnd);
+            // 진행 중이던 HMI 캡처가 있으면 패널 설정(에셋)을 원래대로
+            var doc = UnityEngine.Object.FindAnyObjectByType<UnityEngine.UIElements.UIDocument>();
+            if (_uiRt != null && doc != null)
+            {
+                doc.panelSettings.targetTexture = null;
+                doc.panelSettings.clearColor = _uiClearColor;
+                doc.panelSettings.colorClearValue = _uiClearValue;
+            }
             Capture("overview_end");
 
             // 놓인 박스 ↔ 가장 가까운 칸 중심
@@ -199,6 +217,81 @@ namespace ConveyorTwin.EditorTools
             EditorApplication.ExitPlaymode();
             if (Application.isBatchMode)
                 EditorApplication.delayCall += () => EditorApplication.Exit(ok ? 0 : 1);
+        }
+
+        // ---------- HMI 포함 캡처 ----------
+        // UI Toolkit 패널은 카메라 렌더에 들어가지 않는다. 패널을 잠시 렌더 텍스처에 그리게 하고(PanelSettings.targetTexture),
+        // 다음 프레임 이후에 3D 화면 위에 알파 합성한다. 패널 설정은 에셋이라 끝나면 반드시 원래 값으로 되돌린다.
+        static readonly Queue<string> HmiRequests = new Queue<string>();
+        static RenderTexture _uiRt;
+        static double _uiRequestedAt;
+        static string _uiName;
+        static bool _uiClearColor;
+        static Color _uiClearValue;
+
+        static void CaptureHmi(string name) => HmiRequests.Enqueue(name);
+
+        static void PumpHmiCapture()
+        {
+            var doc = UnityEngine.Object.FindAnyObjectByType<UnityEngine.UIElements.UIDocument>();
+            if (doc == null || doc.panelSettings == null) { HmiRequests.Clear(); return; }
+            var ps = doc.panelSettings;
+            if (_uiRt == null)
+            {
+                if (HmiRequests.Count == 0) return;
+                _uiName = HmiRequests.Dequeue();
+                _uiRt = new RenderTexture(1600, 900, 24, RenderTextureFormat.ARGB32);
+                _uiClearColor = ps.clearColor;
+                _uiClearValue = ps.colorClearValue;
+                ps.clearColor = true;
+                ps.colorClearValue = Color.clear;
+                ps.targetTexture = _uiRt;
+                _uiRequestedAt = EditorApplication.timeSinceStartup;
+                return;
+            }
+            if (EditorApplication.timeSinceStartup - _uiRequestedAt < 0.4) return;   // 패널이 몇 프레임 그릴 시간
+
+            const int w = 1600, h = 900;
+            var ui = ReadRt(_uiRt, TextureFormat.RGBA32);
+            ps.targetTexture = null;
+            ps.clearColor = _uiClearColor;
+            ps.colorClearValue = _uiClearValue;
+            UnityEngine.Object.DestroyImmediate(_uiRt);
+            _uiRt = null;
+
+            var cam = Camera.main;
+            var camRt = new RenderTexture(w, h, 24);
+            cam.targetTexture = camRt;
+            cam.Render();
+            cam.targetTexture = null;
+            var scene = ReadRt(camRt, TextureFormat.RGB24);
+            UnityEngine.Object.DestroyImmediate(camRt);
+
+            var a = scene.GetPixels32();
+            var b = ui.GetPixels32();
+            for (int i = 0; i < a.Length; i++)
+            {
+                float t = b[i].a / 255f;
+                a[i] = new Color32((byte)(a[i].r * (1 - t) + b[i].r * t), (byte)(a[i].g * (1 - t) + b[i].g * t), (byte)(a[i].b * (1 - t) + b[i].b * t), 255);
+            }
+            scene.SetPixels32(a);
+            var dir = Path.GetFullPath(Path.Combine(Application.dataPath, "..", "..", "dist", "playcheck"));
+            Directory.CreateDirectory(dir);
+            File.WriteAllBytes(Path.Combine(dir, "hmi_" + _uiName + ".png"), scene.EncodeToPNG());
+            UnityEngine.Object.DestroyImmediate(scene);
+            UnityEngine.Object.DestroyImmediate(ui);
+            _shots++;
+        }
+
+        static Texture2D ReadRt(RenderTexture rt, TextureFormat format)
+        {
+            var prev = RenderTexture.active;
+            RenderTexture.active = rt;
+            var tex = new Texture2D(rt.width, rt.height, format, false);
+            tex.ReadPixels(new Rect(0, 0, rt.width, rt.height), 0, 0);
+            tex.Apply();
+            RenderTexture.active = prev;
+            return tex;
         }
 
         static void Capture(string name)

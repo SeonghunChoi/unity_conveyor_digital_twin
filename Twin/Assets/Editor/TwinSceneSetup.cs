@@ -88,6 +88,7 @@ namespace ConveyorTwin.EditorTools
             hso.FindProperty("twin").objectReferenceValue = controller;
             hso.FindProperty("launcher").objectReferenceValue = launcher;
             hso.FindProperty("diagnosticHud").objectReferenceValue = hud;
+            hso.FindProperty("robot").objectReferenceValue = twin.GetComponent<RobotTwin>();
             hso.FindProperty("koreanFont").objectReferenceValue = GetOrCreateKoreanFont();
             hso.ApplyModifiedPropertiesWithoutUndo();
 

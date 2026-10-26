@@ -118,7 +118,7 @@
 .alarm-head { flex-direction: row; align-items: center; }
 .alarm-counts { flex-grow: 1; margin-left: 10px; font-size: 13px; color: rgb(150, 156, 162); }
 .btn-ack.hidden { display: none; }
-.alarm-list { margin-top: 6px; }
+.alarm-list { margin-top: 6px; overflow: hidden; flex-shrink: 1; }
 .alarm-empty.hidden { display: none; }
 .alarm-row {
     flex-direction: row;
@@ -187,3 +187,29 @@
 .banner.warn { border-color: rgb(255, 170, 40); background-color: rgba(70, 54, 24, 0.92); }
 .banner.info { border-color: rgb(90, 160, 230); background-color: rgba(26, 48, 72, 0.92); }
 .banner-text { font-size: 18px; -unity-font-style: bold; -unity-text-align: middle-center; }
+
+/* ---------- 로봇 셀 (2단계 8일 차) ---------- */
+.robot-state { font-size: 20px; -unity-font-style: bold; color: rgb(220, 224, 228); margin: 2px 0 4px 0; }
+.robot-card.warn { border-color: rgb(255, 170, 40); }
+.robot-card.warn .robot-state { color: rgb(255, 190, 90); }
+.robot-card.bad { border-color: rgb(240, 70, 60); background-color: rgba(82, 30, 28, 0.92); }
+.robot-card.bad .robot-state { color: rgb(255, 120, 110); }
+.robot-card.stale .robot-state, .robot-card.stale .joint-value, .robot-card.stale .stat-value { color: rgb(110, 116, 122); }
+.stat-third { width: 33%; }
+/* IO 표시: 꺼짐은 어두운 회색, 켜짐은 밝은 회색 (ISA-101: 정상 상태에 색을 쓰지 않음), 이상만 색 */
+.io-row { flex-direction: row; margin: 2px 0 6px 0; }
+.io { font-size: 12px; padding: 2px 8px; margin-right: 6px; border-radius: 3px; border-width: 1px;
+      border-color: rgb(70, 76, 82); color: rgb(110, 116, 122); background-color: rgb(36, 40, 44); }
+.io.on { color: rgb(20, 22, 24); background-color: rgb(200, 205, 210); border-color: rgb(200, 205, 210); }
+.io.bad { color: rgb(255, 120, 110); border-color: rgb(240, 70, 60); background-color: rgb(82, 30, 28); }
+.joint-list { margin-top: 2px; }
+.joint-row { flex-direction: row; align-items: center; height: 16px; }
+.joint-name { width: 26px; font-size: 12px; color: rgb(130, 136, 142); }
+.joint-bar { flex-grow: 1; height: 8px; background-color: rgb(54, 60, 66); border-radius: 2px; margin: 0 8px; }
+.joint-zero { background-color: rgb(96, 104, 112); }
+.joint-zero { position: absolute; top: 0; bottom: 0; width: 1px; background-color: rgb(78, 86, 94); }
+.joint-fill { position: absolute; top: 0; bottom: 0; width: 3px; background-color: rgb(225, 229, 233); }
+.joint-row.warn .joint-fill { background-color: rgb(255, 170, 40); }
+.joint-value { width: 64px; font-size: 13px; -unity-text-align: middle-right; color: rgb(220, 224, 228); }
+/* 알람 행은 줄어들지 않는다: 넘치면 목록이 잘리고, 행끼리 겹치지 않게 (8일 차) */
+.alarm-row { flex-shrink: 0; }

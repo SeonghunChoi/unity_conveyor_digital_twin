@@ -121,7 +121,7 @@ claude.ai에서 진행한 기획 대화의 결정 사항을 옮겨 왔습니다.
 | 5 | 트윈 OPC UA 클라이언트: 구독, StatusCode·SourceTimestamp 검증, 재연결 | ✅ 완료 (`RobotOpcUaLink`·`RobotGate`, 인증서 자동 발급·재발급, 서버 재시작 감지 `docs/robot-opcua.md` 5절) |
 | 6 | 트윈 로봇 미러링, 물건 인계 (컨베이어 → 그리퍼 → 팔레트) | ✅ 완료 (`RobotTwin`, 재생 시계 공유, 집기·놓기 오차 최대 3.9mm, 반송 방향 버그 수정 `docs/robot-cell.md`) |
 | 7 | 셀 장애 버튼 + 트윈 대응 (OPC UA 세션 끊김, 비상정지, 픽 실패 등) ★ | ✅ 완료 (4종, 시나리오 자동 조작으로 검증, 버그 8건 수정 `docs/robot-faults.md`) |
-| 8 | HMI·알람에 로봇 셀 통합 | |
+| 8 | HMI·알람에 로봇 셀 통합 | ✅ 완료 (로봇 OPC UA 칩, 로봇 셀 카드, 배너, 진단 HUD, HMI 합성 캡처 `Twin/README.md`) |
 | 9 | 배포 빌드, 클린 PC 실행 테스트 | |
 | 10 | README·아키텍처 갱신, 시연 영상 | |
 
@@ -178,6 +178,7 @@ dotnet run --project src/DummyServer  # 더미 서버 실행 (브로커 127.0.0.
   로봇 glb가 있으면 `RobotCellBuilder`가 로봇·그리퍼·팔레트도 놓는다. 배치모드: `-executeMethod ConveyorTwin.EditorTools.TwinSceneSetup.SetupBatch`.
 - 로봇 OPC UA 연결 점검: `Tools/Twin/Check Robot OPC UA Link` (`RobotLinkCheck.CheckBatch -linkSeconds N [-freshPki]`) — 더미 서버 실행 중이어야 한다.
   트윈 코드는 `Twin/Assets/Scripts/Twin/OpcUa/` (`RobotOpcUaLink` 연결·발급·재접속, `RobotGate` 값 검사, `MonoTcpTransport`).
+- HMI 캡처: UI Toolkit 패널은 카메라 렌더에 안 들어가므로 플레이 점검이 `PanelSettings.targetTexture`로 잠시 렌더 텍스처에 그려 합성한다 (`dist/playcheck/hmi_*.png`). 패널 설정은 에셋이라 끝나면 원래 값으로 되돌린다.
 - 플레이 점검: `Tools/Twin/Play Check` (`TwinPlayCheck.RunBatch -playSeconds N`, **-quit 없이**) — 플레이 모드에서 인계·오차·경고 측정, `dist/playcheck/*.png`.
 - 셀 점검: `Tools/Twin/Check Robot Cell` (`RobotCellCheck.CheckBatch`) — 픽 위치 실측 비교, 48칸 IK 도달·가동 범위, TCP 오차, `dist/cellcheck/*.png` 캡처.
 - Unity 점검: 메뉴 `Tools/CAD/Check Conveyor Import` (`Twin/Assets/Editor/CadImportCheck.cs`)가 서브메시·축·드럼 간 거리를 콘솔에 출력한다.
