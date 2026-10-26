@@ -28,6 +28,13 @@ public partial class MainWindow : Window
                 Title, MessageBoxButton.OK, MessageBoxImage.Error);
             Close();
         }
+        catch (Exception ex)
+        {
+            // OPC UA 서버(4840) 시작 실패 등. 포트 충돌이면 스택이 ServiceResultException으로 감싸 던진다
+            MessageBox.Show(this, "서버 시작 실패: " + ex.GetBaseException().Message,
+                Title, MessageBoxButton.OK, MessageBoxImage.Error);
+            Close();
+        }
     }
 
     void OnClearLog(object sender, RoutedEventArgs e) => _vm.ClearLog();

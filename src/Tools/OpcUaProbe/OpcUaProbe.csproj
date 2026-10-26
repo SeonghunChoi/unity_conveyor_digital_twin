@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- 더미 서버의 로봇 OPC UA 서버 점검 도구 (UaExpert 대신 명령줄로 확인). 솔루션에는 넣지 않는다.
+       트윈과 같은 신원·정책(Shared.OpcUaEndpoint)으로 접속해 주소 공간·값·구독을 출력한다. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <NoWarn>CS0618</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\Shared\ConveyorTwin.Shared.csproj" />
+    <PackageReference Include="OPCFoundation.NetStandard.Opc.Ua.Client" Version="1.5.378.182" />
+  </ItemGroup>
+
+</Project>

@@ -30,6 +30,10 @@
                     <TextBlock Style="{StaticResource Value}" Text="{Binding Sid, Mode=OneWay}"/></StackPanel>
                 <StackPanel><TextBlock Style="{StaticResource Caption}" Text="접속 클라이언트"/>
                     <TextBlock Style="{StaticResource Value}" Text="{Binding ClientsText}"/></StackPanel>
+                <StackPanel><TextBlock Style="{StaticResource Caption}" Text="로봇 OPC UA"/>
+                    <TextBlock Style="{StaticResource Value}"><Run Text="{Binding OpcUaEndpoint, Mode=OneWay}"/> <Run Text="{Binding OpcUaStatus, Mode=OneWay}"/></TextBlock></StackPanel>
+                <StackPanel><TextBlock Style="{StaticResource Caption}" Text="OPC UA 세션"/>
+                    <TextBlock Style="{StaticResource Value}" Text="{Binding OpcUaSessionsText}"/></StackPanel>
             </WrapPanel>
         </Border>
 

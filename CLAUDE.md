@@ -28,7 +28,7 @@ claude.ai에서 진행한 기획 대화의 결정 사항을 옮겨 왔습니다.
 | 구성 | 기술 | 위치 |
 | --- | --- | --- |
 | 공용 규약 | netstandard2.1 클래스 라이브러리, 외부 의존성 없음 | `src/Shared` |
-| 더미 서버 | WPF (.NET 8) + MQTTnet 5.2 브로커 내장 + 데이터 발행 | `src/DummyServer` |
+| 더미 서버 | WPF (.NET 8) + MQTTnet 5.2 브로커 내장 + 데이터 발행, (2단계) OPC UA 서버 1.5.378 `opc.tcp://127.0.0.1:4840` | `src/DummyServer` |
 | 트윈 | Unity 6.3 LTS, URP, Newtonsoft JSON, MQTTnet 4.3.7(netstandard2.1, `src/UnityPlugins`가 복사. 5.x는 net8+ 전용이라 불가) | `Twin` |
 | 통신 | MQTT, `127.0.0.1:1883`, 토픽 `dt/conveyor01/#` | `docs/protocol.md` |
 | CAD | mk GUF-P 2000 STEP → FreeCAD → glTF → glTFast | `cad` (저장소 미포함) |
@@ -56,6 +56,8 @@ claude.ai에서 진행한 기획 대화의 결정 사항을 옮겨 왔습니다.
 - `Equipment`: 벨트 길이(1.95m)와 잼 판단 배수(1.5). 서버는 물건 이동 시뮬레이션에, 트윈은 잼 판단에 쓴다.
 - `RobotCell` (2단계): 로봇 셀 배치·적재 패턴. 좌표는 **로봇 베이스 좌표계**(ABB base frame, m, Z-up 오른손, +X = 컨베이어 쪽).
   트윈에서 Unity 월드 = (0, 0, 1.70) + (y, z, −x). 박스 크기는 1단계 값(0.30×0.20×0.15)과 같아야 한다. 상세 `docs/robot-cell.md`.
+- `RobotNodes` / `OpcUaEndpoint` (2단계): 로봇 OPC UA 노드 ID(문자열 ID, 네임스페이스 `urn:conveyortwin:robotcell`, 인덱스는 접속 후 조회),
+  운전 모드·실행 상태 열거형, 서버·트윈 신원(ApplicationUri·인증서 주체)과 발급 인수. 상세 `docs/robot-opcua.md`.
 - `Messages`: 데이터 메시지는 모두 `Envelope`(sid/seq/ts)를 상속한다. 예외로 `StatusMessage`는 seq가 없다 (Last Will로 브로커가 대신 발행하므로).
   트윈의 seq 기록은 `status`의 sid가 바뀔 때 초기화된다.
 - 직렬화는 양쪽 모두 Newtonsoft JSON에 camelCase 네이밍 + 소문자 문자열 enum 설정을 각자 해야 `docs/protocol.md`의 페이로드와 맞는다.
@@ -103,12 +105,16 @@ claude.ai에서 진행한 기획 대화의 결정 사항을 옮겨 왔습니다.
   ① 스택의 TCP 접속이 Mono에서 실패하므로 `MonoTcpTransport`로 `opc.tcp` 바인딩을 교체해야 하고,
   ② Mono는 자체 서명 인증서를 만들지 못하므로 클라이언트 인증서를 .NET 쪽에서 발급해 넣어야 한다.
   ③ `Aes256_Sha256_RsaPss`는 Mono에서 불가 → 트윈은 Basic256Sha256을 쓴다.
+- **인증서 (3일 차 결정)**: 서버 exe가 `--provision-twin-cert <트윈 pki>`로 트윈 인증서를 발급하고 서로의 신뢰 목록에 넣는다 (GDS 축소판).
+  양쪽 모두 자동 수락 끔. 서버 PKI `%LOCALAPPDATA%\ConveyorTwin\DummyServer\pki`, 트윈 PKI는 Unity `persistentDataPath/pki`.
+- **정보 모델 (3일 차 결정)**: OPC 40010 Robotics 구조·이름을 따른 단순화 모델 (표준 NodeSet 미사용). 트윈은 `JointPositions`(Double[6]) 배열을 구독한다.
+  값이 바뀔 때만 갱신되므로 끊김은 값 주기가 아니라 세션 KeepAlive로 판단한다.
 
 | 일차 | 작업 | 상태 |
 | --- | --- | --- |
 | 1 | 로봇 기종·CAD 확정, 셀 배치, OPC UA 스파이크 (Unity 배포 빌드에서 접속 확인) | ✅ 완료 (`docs/opcua-spike.md`, `docs/cad-robot.md`) |
 | 2 | 로봇 CAD 변환 (기존 파이프라인 재사용), 관절 피벗·계층 정리, 그리퍼·팔레트 | ✅ 완료 (관절 계층 glb, 진공 그리퍼·EUR 팔레트, 셀 배치 48칸 도달 확인 `docs/robot-cell.md`) |
-| 3 | 서버 OPC UA 서버 골격, 로봇 정보 모델 (관절각, 모드, 프로그램 상태, 그리퍼, 사이클 수) | |
+| 3 | 서버 OPC UA 서버 골격, 로봇 정보 모델 (관절각, 모드, 프로그램 상태, 그리퍼, 사이클 수) | ✅ 완료 (40010 참고 단순화 모델, 서버 exe 인증서 발급, `docs/robot-opcua.md`) |
 | 4 | 서버 가상 로봇 컨트롤러: 관절 공간 보간, 출구 도착 → 픽 사이클, 팔레트 적재 패턴 | |
 | 5 | 트윈 OPC UA 클라이언트: 구독, StatusCode·SourceTimestamp 검증, 재연결 | |
 | 6 | 트윈 로봇 미러링, 물건 인계 (컨베이어 → 그리퍼 → 팔레트) | |
@@ -148,6 +154,8 @@ dotnet run --project src/DummyServer  # 더미 서버 실행 (브로커 127.0.0.
 - 테스트 프로젝트는 아직 없다.
 - `src/UnityPlugins`는 OPC UA 클라이언트 DLL(1.5.378.x)과 의존 DLL도 `Twin/Assets/Plugins/OpcUa`로 복사한다 (Newtonsoft.Json은 Unity 패키지와 겹쳐 제외).
 - `src/Spikes/`는 솔루션에 넣지 않은 버림용 스파이크다. 재현 절차는 `docs/opcua-spike.md`.
+- `src/Tools/OpcUaProbe` (솔루션 미포함): 트윈과 같은 신원으로 로봇 OPC UA 서버에 접속해 주소 공간·값·구독을 출력하는 점검 도구.
+  `dotnet run --project src/Tools/OpcUaProbe -- <트윈 pki> [None]` (pki는 서버의 `--provision-twin-cert`로 먼저 발급).
 - 하위 프로젝트 생성 절차는 각 폴더 README에 있다: `Twin/README.md`(Unity 프로젝트 생성·패키지), `src/DummyServer/README.md`(4일 차 `dotnet new`/`sln add` 명령).
 
 ### CAD 변환 (STEP → glb)

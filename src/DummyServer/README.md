@@ -10,6 +10,8 @@ dotnet run --project src/DummyServer
 
 배포 (13일 차): `dotnet publish src/DummyServer -r win-x64 --self-contained -p:PublishSingleFile=true`
 
+트윈 OPC UA 인증서 발급 (2단계, 창 없이 실행): `ConveyorTwin.DummyServer.exe --provision-twin-cert <트윈 pki 경로>`
+
 ## 구성
 
 | 파일 | 역할 |
@@ -18,6 +20,9 @@ dotnet run --project src/DummyServer
 | `Mqtt/DevicePublisher.cs` | 가상 설비의 MQTT 클라이언트. 헤더(sid, seq, ts) 부여, JSON 직렬화, QoS·Retained 적용, 접속 시 `status` Last Will 등록 |
 | `Simulation/ConveyorSimulator.cs` | 20ms 주기로 벨트·모터 물리량과 물건 위치를 진행시키고, 센서 엣지·측정값을 발행 |
 | `MainViewModel.cs`, `MainWindow.xaml` | 상태 표시와 송신 로그 (100ms마다 일괄 반영, 최근 1000건) |
+| `OpcUa/RobotOpcUaServer.cs` | (2단계) 로봇 OPC UA 서버 `opc.tcp://127.0.0.1:4840`, 신뢰 목록 기반 보안, 트윈 인증서 발급(`CertificateProvisioning`) |
+| `OpcUa/RobotNodeManager.cs` | (2단계) OPC 40010 구조를 따른 로봇 주소 공간 (`Shared.RobotNodes`, [docs/robot-opcua.md](../../docs/robot-opcua.md)) |
+| `Simulation/RobotPlaceholder.cs` | (2단계 3일 차) 홈 자세만 내는 임시 로봇. 4일 차 가상 로봇 컨트롤러로 교체 |
 
 ### 왜 브로커에 "클라이언트로" 발행하나
 

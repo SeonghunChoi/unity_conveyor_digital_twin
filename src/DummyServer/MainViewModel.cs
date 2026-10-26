@@ -4,6 +4,7 @@ using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Windows.Threading;
 using ConveyorTwin.DummyServer.Mqtt;
+using ConveyorTwin.DummyServer.OpcUa;
 using ConveyorTwin.DummyServer.Simulation;
 using ConveyorTwin.Shared;
 
@@ -19,13 +20,16 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
     readonly EmbeddedBroker _broker = new();
     readonly DevicePublisher _publisher = new();
+    readonly RobotOpcUaServer _opcua = new();
     readonly CancellationTokenSource _cts = new();
     readonly ConcurrentQueue<SentMessage> _pending = new();
     readonly DispatcherTimer _uiTimer;
     Task? _simTask;
+    Task? _robotTask;
 
     volatile ConveyorSnapshot? _snapshot;
     volatile IReadOnlyCollection<string> _clients = Array.Empty<string>();
+    volatile IReadOnlyCollection<string> _opcSessions = Array.Empty<string>();
 
     public ObservableCollection<SentMessage> Log { get; } = new();
 
@@ -34,6 +38,14 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
 
     string _brokerStatus = "시작 중";
     public string BrokerStatus { get => _brokerStatus; private set => Set(ref _brokerStatus, value); }
+
+    public string OpcUaEndpoint => Shared.OpcUaEndpoint.Url;
+
+    string _opcStatus = "시작 중";
+    public string OpcUaStatus { get => _opcStatus; private set => Set(ref _opcStatus, value); }
+
+    string _opcSessionsText = "-";
+    public string OpcUaSessionsText { get => _opcSessionsText; private set => Set(ref _opcSessionsText, value); }
 
     string _clientsText = "-";
     public string ClientsText { get => _clientsText; private set => Set(ref _clientsText, value); }
@@ -112,6 +124,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
     {
         _publisher.Sent += m => _pending.Enqueue(m);
         _broker.ClientsChanged += c => _clients = c;
+        _opcua.SessionsChanged += s => _opcSessions = s;
         _uiTimer = new DispatcherTimer(TimeSpan.FromMilliseconds(100), DispatcherPriority.Background, (_, _) => FlushToUi(),
             Dispatcher.CurrentDispatcher);
     }
@@ -126,6 +139,12 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         _sim = new ConveyorSimulator(_publisher);
         _sim.Updated += s => _snapshot = s;
         _simTask = Task.Run(() => _sim.RunAsync(_cts.Token));
+
+        // 2단계: 로봇 OPC UA 서버 (4일 차에 가상 로봇 컨트롤러로 교체될 임시 로봇이 값을 채운다)
+        await _opcua.StartAsync();
+        OpcUaStatus = "대기 중";
+        var robot = new RobotPlaceholder(_opcua);
+        _robotTask = Task.Run(() => robot.RunAsync(_cts.Token));
     }
 
     async Task RunFaultActionAsync(Func<Task> action, string name)
@@ -150,6 +169,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         SentCount += added;
 
         ClientsText = _clients.Count == 0 ? "-" : string.Join(", ", _clients);
+        OpcUaSessionsText = _opcSessions.Count == 0 ? "-" : string.Join(", ", _opcSessions);
 
         if (_snapshot is { } s)
         {
@@ -165,6 +185,11 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
             BrokerStatus = "오류: " + _simTask.Exception?.GetBaseException().Message;
             _simTask = null;
         }
+        if (_robotTask is { IsFaulted: true })
+        {
+            OpcUaStatus = "오류: " + _robotTask.Exception?.GetBaseException().Message;
+            _robotTask = null;
+        }
     }
 
     public async ValueTask DisposeAsync()
@@ -175,6 +200,11 @@ public sealed class MainViewModel : INotifyPropertyChanged, IAsyncDisposable
         {
             try { await _simTask; } catch (OperationCanceledException) { }
         }
+        if (_robotTask != null)
+        {
+            try { await _robotTask; } catch (OperationCanceledException) { }
+        }
+        await _opcua.DisposeAsync();
         await _publisher.DisposeAsync();
         await _broker.DisposeAsync();
     }
