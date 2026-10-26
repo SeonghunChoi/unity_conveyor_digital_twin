@@ -122,7 +122,7 @@ claude.ai에서 진행한 기획 대화의 결정 사항을 옮겨 왔습니다.
 | 6 | 트윈 로봇 미러링, 물건 인계 (컨베이어 → 그리퍼 → 팔레트) | ✅ 완료 (`RobotTwin`, 재생 시계 공유, 집기·놓기 오차 최대 3.9mm, 반송 방향 버그 수정 `docs/robot-cell.md`) |
 | 7 | 셀 장애 버튼 + 트윈 대응 (OPC UA 세션 끊김, 비상정지, 픽 실패 등) ★ | ✅ 완료 (4종, 시나리오 자동 조작으로 검증, 버그 8건 수정 `docs/robot-faults.md`) |
 | 8 | HMI·알람에 로봇 셀 통합 | ✅ 완료 (로봇 OPC UA 칩, 로봇 셀 카드, 배너, 진단 HUD, HMI 합성 캡처 `Twin/README.md`) |
-| 9 | 배포 빌드, 클린 PC 실행 테스트 | |
+| 9 | 배포 빌드, 클린 PC 실행 테스트 | ✅ 완료 (샌드박스 자동 시험 `sandbox_test.ps1 -Auto`: 인증서 발급·접속 11초, 장애 4종 통과 `Twin/README.md` 배포 절) |
 | 10 | README·아키텍처 갱신, 시연 영상 | |
 
 ## 1단계에서 하지 않는 것
@@ -149,6 +149,8 @@ dotnet build src/Shared            # 빌드 + Twin/Assets/Plugins/Shared 로 DLL
 dotnet build src                   # 솔루션 전체 (DummyServer, Shared, UnityPlugins). Shared·MQTTnet DLL을 Twin/Assets/Plugins로 복사
 dotnet run --project src/DummyServer  # 더미 서버 실행 (브로커 127.0.0.1:1883 + 가상 컨베이어)
 # 배포 빌드: Unity 메뉴 Tools/Twin/Build Release → dist/ConveyorTwin/ (트윈 + Server/ 단일 exe, gitignore)
+# 배포본 자체 점검: dist/ConveyorTwin/ConveyorTwin.exe -selfcheck 60 -selfcheckOut <폴더>   (selfcheck.log + shot_*.png, 종료 코드 0 = 통과)
+# 클린 PC 자동 시험: powershell -ExecutionPolicy Bypass -File tools/build/sandbox_test.ps1 -Auto   (결과 dist/sandbox-results)
 ```
 
 - DLL 복사는 `Twin/Assets`가 있을 때만 일어난다 (csproj의 `CopyToUnity` 타깃). 복사된 DLL은 `.gitignore` 대상이므로,

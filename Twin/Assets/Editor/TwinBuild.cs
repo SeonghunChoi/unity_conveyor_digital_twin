@@ -29,6 +29,7 @@ namespace ConveyorTwin.EditorTools
         const string ProductName = "ConveyorTwin";
         const string ScenePath = "Assets/Scenes/Twin.unity";
         const string GlbPath = "Assets/ThirdParty/Cad/conveyor.glb";
+        const string RobotGlbPath = "Assets/ThirdParty/Cad/irb2600.glb";
         const string KoreanFontPath = "Assets/ThirdParty/Fonts/KoreanOSFont.asset";
         const string ServerExe = "ConveyorTwin.DummyServer.exe";
 
@@ -63,6 +64,8 @@ namespace ConveyorTwin.EditorTools
             // ---- 사전 점검: 저장소에 없는 생성물 (CAD glb, 한글 폰트) ----
             if (!File.Exists(GlbPath))
                 return $"{GlbPath} 이 없습니다. tools/cad/export_conveyor.py를 먼저 실행하세요.";
+            if (!File.Exists(RobotGlbPath))
+                return $"{RobotGlbPath} 이 없습니다. tools/cad/export_robot.py를 먼저 실행하세요 (2단계 로봇 셀).";
             if (!File.Exists(KoreanFontPath))
                 return $"{KoreanFontPath} 이 없습니다. Tools/Twin/Setup Scene을 먼저 실행하세요.";
             if (!File.Exists(ScenePath))
@@ -154,25 +157,27 @@ namespace ConveyorTwin.EditorTools
         static void WriteReadme()
         {
             var text =
-$@"ConveyorTwin - 벨트 컨베이어 디지털 트윈 (포트폴리오 1단계)
+$@"ConveyorTwin - 컨베이어 + 로봇 셀 디지털 트윈 (포트폴리오 2단계)
 빌드: {DateTime.Now:yyyy-MM-dd HH:mm}
 
 [실행]
 ConveyorTwin.exe 를 실행하세요.
-더미 서버(가상 설비 + MQTT 브로커)가 실행 중이 아니면 트윈이 Server\ConveyorTwin.DummyServer.exe 를 자동으로 띄웁니다.
+더미 서버(가상 설비 + MQTT 브로커 + 로봇 OPC UA 서버)가 실행 중이 아니면 트윈이 Server\ConveyorTwin.DummyServer.exe 를 자동으로 띄웁니다.
+처음 실행할 때 트윈이 서버로부터 OPC UA 인증서를 발급받습니다 (몇 초, 사용자 데이터 폴더에 저장).
 .NET 등 별도 설치는 필요 없습니다 (Windows 10/11 64비트).
 
 [시연]
 1. 서버 창의 '장애 주입' 버튼을 누르면 트윈 화면이 반응합니다.
-   연결 끊김 / 전송 지연 3초 / 순서 뒤섞기 / 이상값 송신 / 물건 걸림 / 모터 정지
+   컨베이어(MQTT): 연결 끊김 / 전송 지연 3초 / 순서 뒤섞기 / 이상값 송신 / 물건 걸림 / 모터 정지
+   로봇 셀(OPC UA): 로봇 통신 끊김 / 비상정지 / 흡착 실패 / 관절 엔코더 이상
 2. 다시 누르면 복구됩니다. 서버 창의 송신 로그(보낸 것)와 트윈 화면(받은 것)을 비교해 보세요.
 3. 트윈 오른쪽 위 '진단' 버튼은 수신 상세 정보를 보여줍니다.
 
 [참고]
-- 통신은 이 PC 안(127.0.0.1:1883)에서만 이루어지며 외부 네트워크를 쓰지 않습니다.
+- 통신은 이 PC 안(MQTT 127.0.0.1:1883, OPC UA 127.0.0.1:4840)에서만 이루어지며 외부 네트워크를 쓰지 않습니다.
 - 트윈을 닫아도 서버는 계속 실행됩니다 (서버는 '현실' 역할). 서버 창을 닫으면 종료됩니다.
 - 한글 표시는 Windows 기본 글꼴(맑은 고딕)을 사용합니다.
-- 컨베이어 3D 모델은 mk Technology Group의 GUF-P 2000 CAD 데이터를 변환한 것입니다.
+- 컨베이어 3D 모델은 mk Technology Group의 GUF-P 2000, 로봇 3D 모델은 ABB의 IRB 2600 CAD 데이터를 변환한 것입니다.
   제조사 이용 조건에 따라 재배포하지 마세요.
 ";
             // 메모장에서 한글이 깨지지 않도록 BOM 포함 UTF-8

@@ -150,6 +150,28 @@ dist/ConveyorTwin/
 `ConveyorTwin.exe` 실행 → 서버 자동 실행, HMI 한글 표시, 3D 모델·벨트 흐름·박스 이동, 장애 버튼 반응 모두 정상.
 즉 배포물이 별도 설치 없이 실행되고, 자기 폴더에 쓰지 않으며, 외부 네트워크 없이 동작한다.
 
+### 2단계 배포 확인 (9일 차, 자동 클린 PC 테스트)
+
+`powershell -ExecutionPolicy Bypass -File tools/build/sandbox_test.ps1 -Auto`가 사람 손 없이 전부 돌린다:
+
+1. 샌드박스에 빌드(읽기 전용)·`tools/build`(읽기 전용)·결과 폴더(`dist/sandbox-results`, 쓰기)를 연결하고 네트워크를 끈다
+2. 로그온 명령 `sandbox_inside.ps1`이 트윈을 **자체 점검 모드**(`ConveyorTwin.exe -selfcheck 150 -selfcheckOut <폴더>`, `SelfCheck.cs`)로 실행한다.
+   트윈이 서버를 자동 실행하고, 서버 exe로 OPC UA 인증서를 발급받아 로봇에 접속한다
+3. 로봇이 접속하면 서버 창의 로봇 셀 장애 버튼 4종을 UI Automation으로 차례로 누른다
+4. 트윈은 알람 타임라인·인계 오차를 `selfcheck.log`에, HMI 포함 화면을 `shot_*.png`로 남기고 종료한다. 호스트 스크립트가 샌드박스를 닫는다
+
+2026-10-26 결과 (.NET 미설치 샌드박스, 네트워크 끔, 빌드 폴더 읽기 전용):
+
+| 항목 | 결과 |
+| --- | --- |
+| 서버 자동 실행 → MQTT 연결 | 9.6초 |
+| OPC UA 인증서 발급 → 로봇 접속 (Basic256Sha256) | 11.3초 (첫 실행, 샌드박스 사용자 데이터 폴더에 발급) |
+| 장애 4종 | 비상정지·흡착 실패(트윈 추론)·관절 엔코더 이상·로봇 통신 끊김 모두 알람 발생·해소, 재접속 후 "끊긴 동안 적재 3개" |
+| 150초 운전 | 입구 20 / 출구 20, 잼 0, 사이클 19, 검증 통과 3,589 / Bad 1(엔코더 장애) |
+| 집기 오차 (맞추기 전) | 평균 4.0mm, 최대 8.3mm |
+
+같은 배포본을 이 PC에서도 `-selfcheck 60`으로 먼저 확인했다 (로봇 접속 12초, 잼 0).
+
 빌드에서만 생긴 문제와 해결:
 
 | 증상 | 원인 | 해결 |
@@ -157,6 +179,7 @@ dist/ConveyorTwin/
 | 빌드에서만 벨트 줄무늬가 없음 | `shader_feature`는 빌드에 포함된 머티리얼 에셋이 쓰는 키워드 변형만 남긴다. 벨트 키워드는 런타임에 켜서 변형이 스트리핑됨 | `multi_compile_local`로 변경 |
 | `*_BurstDebugInformation_DoNotShip` 폴더 | Burst(Collections 패키지 의존성)의 디버그 정보 | 빌드 스크립트가 삭제 |
 | (예방) 역직렬화 실패 가능성 | 관리 코드 스트리핑이 Newtonsoft·MQTTnet이 리플렉션으로 쓰는 코드를 지울 수 있음 | `Assets/link.xml`로 Shared·MQTTnet 보존 |
+| (2단계) Mono에서 OPC UA 접속·인증서 생성 불가 | 1일 차 스파이크에서 발견 (docs/opcua-spike.md) | `MonoTcpTransport`, 서버 exe 인증서 발급 — 배포본·클린 PC에서 동작 확인 |
 
 ## 좌표
 

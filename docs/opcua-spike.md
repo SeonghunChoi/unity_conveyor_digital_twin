@@ -86,5 +86,5 @@ Mono에서는 이 조합이 호스트 표기와 관계없이 실패한다.
 ## 확인하지 못한 것
 
 - IL2CPP 백엔드 (배포 빌드는 Mono를 쓰므로 범위 밖)
-- 클린 PC(Windows 샌드박스) 실행 — 9일 차 배포 테스트에서 함께 확인
+- ~~클린 PC(Windows 샌드박스) 실행~~ → 9일 차에 확인: .NET 미설치 샌드박스에서 인증서 발급·Basic256Sha256 접속·장애 4종 동작 (Twin/README.md 배포 절)
 - 장시간 연결, 서버 재시작 후 재연결 (`SessionReconnectHandler`) — 5일 차
