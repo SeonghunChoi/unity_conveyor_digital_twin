@@ -1,7 +1,8 @@
 # 아키텍처
 
-벨트 컨베이어 1대의 디지털 트윈이 어떤 부품으로 이루어지고, 데이터가 어떻게 흐르는지 정리한 문서입니다.
-부품별 상세는 각 폴더 README와 [통신 규약](protocol.md), [CAD 파이프라인](cad-pipeline.md)에 있습니다.
+벨트 컨베이어 + ABB 로봇 팔레타이징 셀의 디지털 트윈이 어떤 부품으로 이루어지고, 데이터가 어떻게 흐르는지 정리한 문서입니다.
+1~6절은 1단계(컨베이어, MQTT), 7~10절은 2단계(로봇 셀, OPC UA)입니다.
+부품별 상세는 각 폴더 README와 [통신 규약](protocol.md), [로봇 OPC UA](robot-opcua.md), [CAD 파이프라인](cad-pipeline.md)에 있습니다.
 
 ## 1. 전체 구조
 
@@ -13,10 +14,17 @@ flowchart LR
         SIM["ConveyorSimulator<br/>벨트·모터 물리, 물건 위치 적분"]
         PUB["DevicePublisher<br/>sid·seq·ts 헤더, 통신 장애 주입<br/>Last Will 등록"]
         BRK["EmbeddedBroker<br/>MQTTnet 5.2, 127.0.0.1:1883"]
+        RC["RobotController<br/>IK·관절 보간·픽앤플레이스·진공"]
+        UAS["RobotOpcUaServer<br/>OPC UA 1.5.378, 내부 4841"]
+        NET["NetworkRelay<br/>4840 → 4841"]
         UI -- 설비 장애 --> SIM
         UI -- 통신 장애 --> PUB
+        UI -- 로봇 장애 --> RC
+        UI -- 로봇 통신 끊김 --> NET
         SIM -- 원시 신호 --> PUB
         PUB -- "MQTT (일반 클라이언트로 접속)" --> BRK
+        SIM <-- "출구 스토퍼 ↔ 집기" --> RC
+        RC -- 원시 신호 --> UAS --> NET
     end
 
     subgraph Twin["트윈 (Unity 6.3, URP)"]
@@ -27,14 +35,24 @@ flowchart LR
         TRK["ItemTracker<br/>FIFO 추적, 잼 판단"]
         ALM["TwinAlarms<br/>발생·해소·확인"]
         OUT["TwinVisuals · StatusLit · TwinHmi<br/>3D 하이라이트, 벨트 흐름, 대시보드"]
+        ULINK["RobotOpcUaLink<br/>인증서·보안 접속·KeepAlive·재접속"]
+        UGATE["RobotGate<br/>StatusCode·SourceTimestamp·가동 범위"]
+        RT["RobotTwin<br/>관절 재생·박스 인계·장애 추론"]
         LINK --> GATE --> CLK --> TRK --> ALM --> OUT
+        ULINK --> UGATE --> RT
+        CLK -- "같은 재생 시각" --> RT
+        TRK <-- "출구 박스 인계" --> RT
+        RT --> ALM
     end
 
-    SH(["공용 규약 DLL (netstandard2.1)<br/>Topics · Messages · SignalSpec · Equipment"])
+    SH(["공용 규약 DLL (netstandard2.1)<br/>Topics · Messages · SignalSpec · Equipment<br/>RobotNodes · RobotCell · RobotKinematics"])
 
     BRK -- "dt/conveyor01/#" --> LINK
+    NET -- "opc.tcp Basic256Sha256" --> ULINK
     SH -. 같은 DLL .- PUB
     SH -. 같은 DLL .- LINK
+    SH -. 같은 DLL .- RC
+    SH -. 같은 DLL .- ULINK
 ```
 
 트윈의 `ServerLauncher`는 시작 시 브로커가 없으면 서버 exe를 실행합니다 (6절).
@@ -60,6 +78,13 @@ flowchart LR
 | `TwinVisuals` + `StatusLit.shader` | `Twin/.../Twin`, `Twin/Assets/Shaders` | 부품별 상태 하이라이트, 오프라인 회색조, UV 없는 벨트 표면 흐름 |
 | `TwinHmi` | `Twin/.../Twin/Hmi`, `Twin/Assets/UI` | 운전자 대시보드: 연결 상태, 측정값·추세, 물건 추적, 알람 |
 | `ServerLauncher` | `Twin/.../Twin` | 시작 시 서버가 없으면 실행. 실행 중 사라지면 운전자에게 묻고 재실행 |
+| `RobotController` | `src/DummyServer/Simulation` | (2단계) 가상 로봇 컨트롤러: 출구 스토퍼의 박스를 집어 팔레트 48칸에 적재. 공구 하향 IK + 관절 공간 5차 보간(MoveJ), 진공은 실제 시간으로 형성, 장애 3종 |
+| `RobotOpcUaServer`·`RobotNodeManager` | `src/DummyServer/OpcUa` | (2단계) OPC 40010 구조의 주소 공간, 값이 바뀔 때만 갱신, 신뢰 목록 기반 보안, 트윈 인증서 발급 모드 |
+| `NetworkRelay` | `src/DummyServer/OpcUa` | (2단계) 로봇 컨트롤러와 트윈 사이 "네트워크". 통신 끊김 장애는 여기만 끊는다 |
+| `RobotOpcUaLink` | `Twin/.../Twin/OpcUa` | (2단계) 인증서 준비(없으면 서버 exe로 발급), Basic256Sha256 접속, 구독, KeepAlive로 끊김 감지·재접속, 서버 시작 시각 |
+| `RobotGate` | `Twin/.../Twin/OpcUa` | (2단계) StatusCode·SourceTimestamp(과거·미래·중복)·관절 가동 범위 검사, 서버 재시작 감지. MQTT 쪽 `MessageGate`의 OPC UA판 |
+| `MonoTcpTransport` | `Twin/.../Twin/OpcUa` | (2단계) Unity(Mono)에서 실패하는 스택의 TCP 접속을 대신하는 opc.tcp 바인딩 |
+| `RobotTwin` | `Twin/.../Twin/Robot` | (2단계) 관절각을 재생 시계로 재생, 압력 스위치로 박스 인계, 흡착 실패·출구 대기 추론, 로봇 알람·하이라이트 |
 
 ## 3. 메시지 하나가 화면에 반영되기까지
 
@@ -143,3 +168,83 @@ flowchart LR
 
 받는 사람은 `ConveyorTwin.exe` 하나만 실행하면 됩니다. .NET 설치가 필요 없고, 통신은 PC 안(127.0.0.1)에서만 이루어집니다.
 Windows 샌드박스(설치 프로그램 없음, 네트워크 끔)에서 동작을 확인했습니다.
+2단계부터는 `tools/build/sandbox_test.ps1 -Auto`가 샌드박스 안에서 트윈 자체 점검(`-selfcheck`)과 로봇 장애 시나리오를 자동으로 돌리고 결과를 회수합니다.
+
+## 7. 로봇 셀: 두 프로토콜을 한 시계로 (2단계)
+
+```mermaid
+flowchart LR
+    subgraph Server["더미 서버"]
+        CONV["ConveyorSimulator"] -- "MQTT ts (Unix ms)" --> M[(MQTT)]
+        ROB["RobotController"] -- "OPC UA SourceTimestamp" --> O[(OPC UA)]
+    end
+    M --> Q1["재생 대기열<br/>센서 엣지"]
+    O --> Q2["재생 대기열<br/>관절각 · IO"]
+    Q1 --> PB{{"재생 시계<br/>현재 − 기준 지연 − 300ms"}}
+    Q2 --> PB
+    PB --> V["같은 순간의 컨베이어와 로봇"]
+```
+
+MQTT의 `ts`와 OPC UA의 SourceTimestamp는 같은 서버 시계에서 나옵니다. 트윈은 둘을 각자의 대기열에 쌓고 **하나의 재생 시계**로 꺼내므로,
+박스가 출구에서 그리퍼로 넘어가는 순간이 두 프로토콜 사이에서 어긋나지 않습니다. 로봇 관절각은 값이 바뀔 때만 오므로,
+마지막 샘플 이후에는 그 자세를 유지하는 것이 곧 현실과 같습니다.
+
+| | MQTT (컨베이어) | OPC UA (로봇) |
+| --- | --- | --- |
+| 데이터 구조 | 토픽 규칙 + JSON (직접 정의) | 서버의 주소 공간을 탐색 (OPC 40010 구조) |
+| 시각·신뢰도 | 페이로드 `ts`·`quality` | SourceTimestamp·StatusCode (표준) |
+| 세션·순서 | `sid`·`seq` (직접 검증) | 서버 시작 시각, 구독 순번 (스택) |
+| 끊김 감지 | Last Will | 세션 KeepAlive |
+| 보안 | 없음 (루프백) | 인증서 신뢰 목록 + Basic256Sha256 |
+
+## 8. 박스 인계 (출구 → 그리퍼 → 팔레트)
+
+```mermaid
+sequenceDiagram
+    participant Conv as 컨베이어 (MQTT)
+    participant Rob as 로봇 (OPC UA)
+    participant Twin as 트윈
+    Conv->>Twin: sensor/exit blocked=true
+    Note over Twin: 박스를 출구 스토퍼에 멈춤<br/>뒤 박스는 잼 판단 거리 누적 중지
+    Rob->>Twin: JointPositions … (하강)
+    Rob->>Twin: DO_VacuumOn = true
+    Rob->>Twin: DI_VacuumOk = true
+    Conv->>Twin: sensor/exit blocked=false (같은 틱)
+    Note over Twin: 처리 순서가 바뀌어도 같은 박스가 넘어오게<br/>ExitHandoff(출구 해제 먼저) · ClaimAtExit(압력 스위치 먼저)<br/>박스를 TCP에 맞춰 부착
+    Rob->>Twin: JointPositions … (팔레트로)
+    Rob->>Twin: DI_VacuumOk = false
+    Note over Twin: 박스를 그 자리에 둔다<br/>(트윈은 칸을 계산하지 않음)
+    Rob->>Twin: CycleCount +1
+```
+
+- 서버는 "지금 무슨 단계"를 보내지 않습니다. 트윈은 출구 센서·진공 출력·압력 스위치·관절각만 보고 박스를 옮깁니다.
+- 흡착 실패도 서버가 알리지 않습니다. 진공 출력 ON인데 압력 스위치가 0.5초 넘게 OFF면 트윈이 판단합니다.
+
+## 9. OPC UA 인증서 발급 (첫 실행)
+
+```mermaid
+sequenceDiagram
+    participant Twin as 트윈 (Unity · Mono)
+    participant Exe as 서버 exe (발급 모드)
+    participant Srv as 로봇 OPC UA 서버
+    Note over Twin: persistentDataPath/pki에 인증서 없음<br/>(Mono는 자체 서명 인증서를 만들지 못함)
+    Twin->>Exe: ConveyorTwin.DummyServer.exe --provision-twin-cert 트윈_pki
+    Note over Exe: 트윈 신원으로 인증서 생성 → 트윈_pki/own<br/>서버 인증서 → 트윈_pki/trusted<br/>트윈 인증서 → 서버 pki/trusted
+    Exe-->>Twin: 종료 코드 0
+    Twin->>Srv: Basic256Sha256 SignAndEncrypt 접속
+    Note over Srv: 신뢰 목록에 있는 인증서만 받음<br/>(실행 중 발급분은 디스크 신뢰 목록을 다시 확인)
+    Srv-->>Twin: 세션 · 구독
+```
+
+현장에서 GDS(Global Discovery Server)가 장비 인증서를 발급·배포하는 역할을 축소한 형태입니다. 서버 인증서가 바뀌어 신뢰가 깨지면
+트윈이 한 번 다시 발급받습니다. Mono의 다른 제약(TCP 접속, RSA-PSS)은 [OPC UA 스파이크](opcua-spike.md)에 있습니다.
+
+## 10. 로봇 장애와 "지어내지 않기"
+
+| 상황 | 트윈이 아는 것 | 트윈이 하는 것 |
+| --- | --- | --- |
+| 로봇 통신 끊김 | 마지막 수신 자세까지만 | 회색조로 멈춤. 재접속하면 SourceTimestamp가 재접속 이전인 값 = 끊긴 동안 바뀐 값. 그 사이 놓인 박스는 위치를 모르므로 그리지 않고 개수만 알림 |
+| 관절각 StatusCode Bad | 측정을 믿을 수 없음 | 마지막 정상 자세 유지. 그동안 놓인 박스도 위치를 지어내지 않음 |
+| 비상정지·흡착 실패 | 원시 신호 (EmergencyStop, MotorsOn, 진공 출력·압력 스위치) | 알람·하이라이트. 출구에 박스가 쌓여도 잼으로 오판하지 않음 |
+
+상세와 검증 결과는 [로봇 장애](robot-faults.md)에 있습니다.
