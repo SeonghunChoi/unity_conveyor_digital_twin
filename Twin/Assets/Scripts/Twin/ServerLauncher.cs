@@ -139,7 +139,7 @@ namespace ConveyorTwin.Twin
         }
 
         /// <summary>실행 파일 후보를 순서대로 찾는다</summary>
-        static string FindServerExe()
+        public static string FindServerExe()
         {
             var env = Environment.GetEnvironmentVariable(EnvVar);
             if (!string.IsNullOrEmpty(env) && File.Exists(env))

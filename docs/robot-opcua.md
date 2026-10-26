@@ -110,3 +110,51 @@ dotnet run --project src/Tools/OpcUaProbe -- C:\temp\twin-pki None       # 보�
 
 4일 차부터 가상 로봇 컨트롤러(`Simulation/RobotController`, [robot-cell.md](robot-cell.md))가 관절 보간과 픽·적재 사이클로 값을 채웁니다.
 `OpcUaProbe <pki> watch <초>`는 로봇 신호와 컨베이어 출구 센서(MQTT)를 함께 기록해 인계 순서·관절 속도를 분석합니다.
+
+## 5. 트윈 클라이언트 (5일 차, `Twin/Assets/Scripts/Twin/OpcUa/`)
+
+| 파일 | 역할 |
+| --- | --- |
+| `RobotOpcUaLink.cs` | 연결 관리 (백그라운드). 인증서 준비 → Basic256Sha256 접속 → 구독 → KeepAlive 감시 → 끊기면 2초 간격 재접속. 값은 큐에만 넣는다 |
+| `RobotGate.cs` | 값 검사 (메인 스레드). MQTT 쪽 `MessageGate`의 OPC UA판 |
+| `MonoTcpTransport.cs` | Mono용 opc.tcp 소켓 바인딩 (스파이크에서 옮김) |
+
+### 연결
+
+- **인증서**: `persistentDataPath/pki`에 트윈 인증서가 없으면 서버 exe를 `--provision-twin-cert`로 실행해 발급받는다 (`ServerLauncher.FindServerExe`와 같은 경로 탐색).
+  접속이 `BadSecurityChecksFailed`·`BadCertificateUntrusted` 등으로 실패하면 서버 인증서가 바뀐 것으로 보고 **한 번** 다시 발급받는다
+  (트윈 인증서는 그대로, 서로의 신뢰 목록만 다시 채움).
+- **구독**: 발행 주기 50ms, KeepAliveCount 10 (값이 없어도 0.5초마다 알림). `JointPositions`는 샘플링 20ms·큐 20, 나머지는 바뀔 때마다.
+- **끊김 감지**: 세션 KeepAlive 1초. 상태 코드가 Bad이거나 서버 상태가 Shutdown·Failed·CommunicationFault면 끊김으로 본다
+  (서버가 막 시작할 때 잠깐 보이는 Running 전 상태는 끊김으로 보지 않는다).
+- **서버 재시작**: 접속 때 `Server.ServerStatus.StartTime`을 읽는다. 바뀌면 `RobotGate`가 노드별 시각 기록을 지운다 (MQTT의 `sid` 변경과 같은 처리).
+
+### 값 검사 (`RobotGate`, 원칙 4)
+
+| 검사 | 처리 |
+| --- | --- |
+| StatusCode Bad | 버림 (마지막 값 유지) |
+| StatusCode Uncertain | 받되 센다 |
+| SourceTimestamp가 미래 (같은 PC인데 2초 이상) | 시계 이상으로 버림 |
+| SourceTimestamp가 그 노드의 마지막 값보다 이전 | 과거 값으로 버림 |
+| SourceTimestamp가 같음 | 중복으로 조용히 버림 — 재구독 때 서버가 보내는 현재값 (정상) |
+| 관절각이 Double[6]이 아니거나 가동 범위 ±1° 밖 | 이상값으로 버림 |
+
+### 점검 (`Tools/Twin/Check Robot OPC UA Link`, `Twin/Assets/Editor/RobotLinkCheck.cs`)
+
+트윈과 같은 `RobotOpcUaLink` + `RobotGate`를 에디터(Mono)에서 N초 돌린다. `-freshPki`면 PKI를 지우고 발급 경로부터 시험한다.
+
+```bash
+Unity.exe -batchmode -quit -projectPath Twin -executeMethod ConveyorTwin.EditorTools.RobotLinkCheck.CheckBatch -linkSeconds 30 [-freshPki] -logFile link-check.log
+```
+
+결과 (2026-10-26, 서버 Debug 빌드):
+
+| 시험 | 결과 |
+| --- | --- |
+| PKI 없이 시작 | 서버 exe 발급 0.9s → 접속 1.6s → 첫 관절각 1.8s. 검증 거부 0 |
+| 관절각 수신 | 약 24건/s, SourceTimestamp → 수신 지연 중앙값 61ms, 95% 109ms (발행 주기 50ms 포함) |
+| 점검 중 서버 강제 종료 → 재실행 | KeepAlive 실패(BadSecureChannelClosed)로 즉시 재연결 상태, 서버가 뜨자 재접속, 서버 재시작 감지 |
+| 서버 PKI까지 지우고 재실행 (서버 인증서 바뀜) | BadSecurityChecksFailed → 재발급 → 재접속. 강제 종료부터 복구까지 약 5초 (서버 기동 약 2초 포함) |
+
+연결은 아직 트윈 씬에 붙지 않았다. 6일 차에 컨트롤러가 이 링크로 로봇을 미러링한다.

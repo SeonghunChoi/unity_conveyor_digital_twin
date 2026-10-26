@@ -10,6 +10,7 @@ using Microsoft.Extensions.Logging;
 using Opc.Ua;
 using Opc.Ua.Client;
 using Opc.Ua.Configuration;
+using ConveyorTwin.Twin.OpcUa;
 using UnityEngine;
 using ILogger = Microsoft.Extensions.Logging.ILogger;
 
@@ -60,7 +61,7 @@ namespace ConveyorTwin.Spikes
             {
                 var telemetry = DefaultTelemetry.Create(b => b.SetMinimumLevel(LogLevel.Warning).AddProvider(new UnityLoggerProvider()));
                 await ProbeSocketsAsync();
-                MonoTcpTransport.Install(telemetry);   // Mono 소켓 문제 우회 (MonoTcpTransport 참고)
+                MonoTcpTransport.Install();   // Mono 소켓 문제 우회 (MonoTcpTransport 참고)
                 var config = await CreateConfigAsync(telemetry);
                 if (CertFailed) failures++;
 

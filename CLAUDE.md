@@ -118,7 +118,7 @@ claude.ai에서 진행한 기획 대화의 결정 사항을 옮겨 왔습니다.
 | 2 | 로봇 CAD 변환 (기존 파이프라인 재사용), 관절 피벗·계층 정리, 그리퍼·팔레트 | ✅ 완료 (관절 계층 glb, 진공 그리퍼·EUR 팔레트, 셀 배치 48칸 도달 확인 `docs/robot-cell.md`) |
 | 3 | 서버 OPC UA 서버 골격, 로봇 정보 모델 (관절각, 모드, 프로그램 상태, 그리퍼, 사이클 수) | ✅ 완료 (40010 참고 단순화 모델, 서버 exe 인증서 발급, `docs/robot-opcua.md`) |
 | 4 | 서버 가상 로봇 컨트롤러: 관절 공간 보간, 출구 도착 → 픽 사이클, 팔레트 적재 패턴 | ✅ 완료 (출구 스토퍼, MoveJ식 5차 보간, 팔레트 교체 `DI_PalletPresent`, `docs/robot-cell.md`) |
-| 5 | 트윈 OPC UA 클라이언트: 구독, StatusCode·SourceTimestamp 검증, 재연결 | |
+| 5 | 트윈 OPC UA 클라이언트: 구독, StatusCode·SourceTimestamp 검증, 재연결 | ✅ 완료 (`RobotOpcUaLink`·`RobotGate`, 인증서 자동 발급·재발급, 서버 재시작 감지 `docs/robot-opcua.md` 5절) |
 | 6 | 트윈 로봇 미러링, 물건 인계 (컨베이어 → 그리퍼 → 팔레트) | |
 | 7 | 셀 장애 버튼 + 트윈 대응 (OPC UA 세션 끊김, 비상정지, 픽 실패 등) ★ | |
 | 8 | HMI·알람에 로봇 셀 통합 | |
@@ -176,6 +176,8 @@ dotnet run --project src/DummyServer  # 더미 서버 실행 (브로커 127.0.0.
   `Twin/Assets/ThirdParty/Cad/conveyor.glb`로 복사한다 (gitignore 대상). Unity 쪽은 glTFast 기본 임포트만 쓴다.
 - 트윈 씬은 메뉴 `Tools/Twin/Setup Scene`이 glb로 다시 구성한다 (`Assets/Scenes/Twin.unity`). 트윈 구조·추정 방식은 `Twin/README.md`.
   로봇 glb가 있으면 `RobotCellBuilder`가 로봇·그리퍼·팔레트도 놓는다. 배치모드: `-executeMethod ConveyorTwin.EditorTools.TwinSceneSetup.SetupBatch`.
+- 로봇 OPC UA 연결 점검: `Tools/Twin/Check Robot OPC UA Link` (`RobotLinkCheck.CheckBatch -linkSeconds N [-freshPki]`) — 더미 서버 실행 중이어야 한다.
+  트윈 코드는 `Twin/Assets/Scripts/Twin/OpcUa/` (`RobotOpcUaLink` 연결·발급·재접속, `RobotGate` 값 검사, `MonoTcpTransport`).
 - 셀 점검: `Tools/Twin/Check Robot Cell` (`RobotCellCheck.CheckBatch`) — 픽 위치 실측 비교, 48칸 IK 도달·가동 범위, TCP 오차, `dist/cellcheck/*.png` 캡처.
 - Unity 점검: 메뉴 `Tools/CAD/Check Conveyor Import` (`Twin/Assets/Editor/CadImportCheck.cs`)가 서브메시·축·드럼 간 거리를 콘솔에 출력한다.
 - **Unity 좌표 (2026-10-20 확인)**: 1유닛 = 1m, 반송 방향 = Unity **+Z** (Drum_Tail z=-0.975 → Drum_Head z=+0.975),
